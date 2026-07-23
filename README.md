@@ -17,6 +17,9 @@ double-click a launcher; everything is also available from the command line.
 | `pictures/` | Three sample images so you can try it immediately. |
 | [**READ ME FIRST.md**](<READ ME FIRST.md>) | A friendly step-by-step guide for non-technical users. |
 
+## See it in action
+<img width="1198" height="1110" alt="windowshowto" src="https://github.com/user-attachments/assets/6a51f1ba-6fda-4965-b391-b5dfa789dd48" />
+
 The launchers set up a private virtual environment (`.venv/`) on first run and
 install their own dependencies — nothing is installed system-wide. To uninstall,
 delete the folder.
