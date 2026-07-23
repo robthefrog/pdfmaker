@@ -1,0 +1,11 @@
+# Private per-machine Python environment created by the launchers on first run
+.venv/
+
+# macOS Finder metadata
+.DS_Store
+
+# Local Claude Code settings
+.claude/
+
+# Generated output
+*.pdf
