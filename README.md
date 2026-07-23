@@ -15,7 +15,7 @@ double-click a launcher; everything is also available from the command line.
 | `generate_pdf.py` | The picture-to-PDF engine (Pillow + img2pdf). |
 | `combine_pdfs.py` | The PDF-merging engine (pypdf). |
 | `pictures/` | Three sample images so you can try it immediately. |
-| **READ ME FIRST.html** | A friendly illustrated guide for non-technical users. |
+| [**READ ME FIRST.md**](<READ ME FIRST.md>) | A friendly step-by-step guide for non-technical users. |
 
 The launchers set up a private virtual environment (`.venv/`) on first run and
 install their own dependencies — nothing is installed system-wide. To uninstall,
@@ -61,8 +61,9 @@ and run it. **On the first screen tick "Add python.exe to PATH"**, then click
    answer the prompts. First run only: on macOS right-click → Open to get past
    Gatekeeper; on Windows click "More info" → "Run anyway" if SmartScreen asks.
 
-The PDF is saved next to your pictures folder. See **READ ME FIRST.html** for
-the full guide, including HEIC conversion tips and troubleshooting.
+The PDF is saved next to your pictures folder. See
+[**READ ME FIRST.md**](<READ ME FIRST.md>) for the full guide, including HEIC
+conversion tips and troubleshooting.
 
 ## Command line
 
