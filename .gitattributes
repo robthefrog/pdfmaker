@@ -1,0 +1,8 @@
+# Keep shell/Python scripts LF everywhere; batch files must be CRLF on disk.
+* text=auto
+*.py text eol=lf
+*.command text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.bat text eol=crlf
+*.png binary

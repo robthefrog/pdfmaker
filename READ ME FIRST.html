@@ -44,7 +44,8 @@
 
   <h1>📄 PDF Maker</h1>
   <p class="lead">Turn a folder of pictures into one PDF — one picture per page, or three
-     side-by-side on a landscape page, in order. Mostly you just double-click a file.</p>
+     side-by-side on a landscape page, in order. Mostly you just double-click a file.
+     Works on <b>Mac</b> and <b>Windows</b>.</p>
 
   <div class="tip">📦 If you received this as a <b>.zip</b>, double-click it first so it becomes a
     <b>PDF Maker</b> folder, then open that folder. Don't run it from inside the zip.</div>
@@ -52,19 +53,33 @@
   <h2>What's in this folder</h2>
   <table>
     <tr><th>Item</th><th>What it is</th></tr>
-    <tr><td><b>Make PDF</b></td><td>The thing you double-click.</td></tr>
+    <tr><td><b>Make PDF</b></td><td>The thing you double-click. On a Mac use <b>Make&nbsp;PDF.command</b>;
+        on Windows use <b>Make&nbsp;PDF.bat</b> (you can also drag a folder onto its icon).</td></tr>
+    <tr><td><b>Combine PDFs</b></td><td>Double-click to merge every PDF in a folder into one.
+        Same idea: <b>.command</b> on a Mac, <b>.bat</b> on Windows.</td></tr>
     <tr><td><code>pictures</code></td><td>A folder with 3 sample pictures so you can try it right away.</td></tr>
-    <tr><td><code>generate_pdf.py</code></td><td>The engine. You don't open this.</td></tr>
+    <tr><td><code>launcher.py</code>, <code>generate_pdf.py</code>, <code>combine_pdfs.py</code></td>
+        <td>The engine. You don't open these.</td></tr>
     <tr><td><b>READ ME FIRST.html</b></td><td>This guide.</td></tr>
   </table>
 
   <h2>1 · One-time setup (about 2 minutes)</h2>
-  <p>PDF Maker needs <b>Python</b>, a free program. Macs don't always include it, so install it once:</p>
+  <p>PDF Maker needs <b>Python</b>, a free program. Install it once:</p>
+  <h3>On a Mac</h3>
   <div class="step">
     <ol>
       <li>Go to <b>https://www.python.org/downloads/macos/</b></li>
       <li>Download the <b>"macOS 64-bit universal2 installer."</b></li>
       <li>Open it and click <b>Continue → Agree → Install</b>.</li>
+    </ol>
+  </div>
+  <h3>On Windows</h3>
+  <div class="step">
+    <ol>
+      <li>Go to <b>https://www.python.org/downloads/windows/</b></li>
+      <li>Download the latest <b>"Windows installer (64-bit)."</b></li>
+      <li>Open it, and on the first screen <b>tick "Add python.exe to PATH"</b> —
+          this is the important bit — then click <b>Install Now</b>.</li>
     </ol>
   </div>
   <div class="tip">💡 The <b>first</b> time you run PDF Maker it also downloads a couple of small
@@ -74,7 +89,7 @@
   <div class="step">
     <ol>
       <li>Put your pictures in the <code>pictures</code> folder (you can delete the 3 samples).</li>
-      <li>Double-click <b>Make PDF</b>.</li>
+      <li>Double-click <b>Make PDF</b> (<b>.command</b> on a Mac, <b>.bat</b> on Windows).</li>
       <li>When it asks for a folder, just press <kbd>Return</kbd> (or drag a different folder in).</li>
       <li>It asks a few quick questions — <b>pictures per page</b> (one, or three to a
           landscape page), <b>note margins</b> / <b>spacing</b>, <b>file size</b>, and
@@ -85,14 +100,20 @@
   </div>
 
   <div class="warn">🔒 <b>The very first time you open it</b> (especially after downloading the zip),
-    macOS may say <i>"cannot be opened because it is from an unidentified developer"</i> or
-    <i>"Apple could not verify…"</i>. This is normal for anything not from the App Store — the file is safe.
+    your computer may warn you. This is normal for anything not from an app store — the file is safe,
+    and you only do this once.
+    <p style="margin:8px 0 2px"><b>On a Mac</b> — <i>"cannot be opened because it is from an unidentified
+    developer"</i> or <i>"Apple could not verify…"</i>:</p>
     <ol style="margin:6px 0 0">
       <li><b>Right-click</b> (or Control-click) <b>Make PDF</b> → <b>Open</b> → <b>Open</b>.</li>
       <li>If there's no <b>Open</b> button, open <b>System Settings → Privacy &amp; Security</b>,
           scroll down, click <b>Open Anyway</b>, then try once more.</li>
     </ol>
-    You only do this once.</div>
+    <p style="margin:10px 0 2px"><b>On Windows</b> — a blue <i>"Windows protected your PC"</i>
+    (SmartScreen) box:</p>
+    <ol style="margin:6px 0 0">
+      <li>Click <b>More info</b>, then <b>Run anyway</b>.</li>
+    </ol></div>
 
   <h2>3 · Three pictures to a page (landscape) 📐</h2>
   <p>Handy for <b>phone screenshots</b>: PDF Maker can place <b>three pictures side-by-side</b>
@@ -176,9 +197,10 @@
   <h2>6 · Which picture types work 🖼️</h2>
   <p>PDF Maker reads <b>JPG, JPEG, PNG, BMP, GIF, TIFF, and WEBP</b>. You can mix them in one folder.</p>
   <div class="warn">📱 <b>iPhone photos (<code>.HEIC</code>)</b> aren't included automatically. PDF Maker will tell you
-    if it finds any. To use them: open them in <b>Preview</b> → <b>File → Export</b> → set Format to
-    <b>JPEG</b> → save into your folder. (Or on the iPhone: <b>Settings → Camera → Formats → Most Compatible</b>,
-    which saves new photos as JPEG.)</div>
+    if it finds any. To use them: on a Mac, open them in <b>Preview</b> → <b>File → Export</b> → set Format to
+    <b>JPEG</b> → save into your folder. On Windows, open the photo in the <b>Photos</b> app →
+    <b>… → Save as</b> → choose <b>JPG</b>. (Or on the iPhone itself:
+    <b>Settings → Camera → Formats → Most Compatible</b>, which saves new photos as JPEG.)</div>
 
   <h3>If a picture can't be read</h3>
   <p>If a file is damaged or isn't really a picture, PDF Maker <b>skips just that one and keeps going</b>,
@@ -213,9 +235,11 @@ python3 "…/generate_pdf.py" --help</code></pre>
   <h2>Troubleshooting</h2>
   <table>
     <tr><th>Problem</th><th>Fix</th></tr>
-    <tr><td>"unidentified developer" pop-up</td><td>Right-click <b>Make PDF</b> → <b>Open</b> → <b>Open</b> (once).</td></tr>
-    <tr><td>"permission denied"</td><td>Open Terminal, type <code>chmod +x </code> then drag in the <b>Make PDF</b> file and press Return (once).</td></tr>
+    <tr><td>"unidentified developer" pop-up (Mac)</td><td>Right-click <b>Make PDF</b> → <b>Open</b> → <b>Open</b> (once).</td></tr>
+    <tr><td>"Windows protected your PC" (SmartScreen)</td><td>Click <b>More info</b> → <b>Run anyway</b> (once).</td></tr>
+    <tr><td>"permission denied" (Mac)</td><td>Open Terminal, type <code>chmod +x </code> then drag in the <b>Make PDF</b> file and press Return (once).</td></tr>
     <tr><td>"Python 3 isn't installed"</td><td>Do the one-time setup in §1 (python.org).</td></tr>
+    <tr><td>Window flashes open and closes (Windows)</td><td>Python probably isn't installed, or wasn't added to PATH — redo §1 and make sure <b>"Add python.exe to PATH"</b> is ticked.</td></tr>
     <tr><td>"no supported images found"</td><td>Make sure the folder has <code>.jpg</code>/<code>.png</code> (etc.) pictures.</td></tr>
     <tr><td>iPhone <code>.HEIC</code> photos skipped</td><td>Convert to JPEG in Preview (see §6).</td></tr>
     <tr><td>One picture is missing from the PDF</td><td>Check the window for a <b>WARNING</b> line — it names the file it couldn't read.</td></tr>

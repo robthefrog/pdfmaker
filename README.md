@@ -2,15 +2,16 @@
 
 Turn a folder of pictures into a PDF — one picture per page (or three
 side-by-side on a landscape page), in order. Also combines a folder of PDFs
-into a single file. Built for macOS: non-technical users just double-click a
-launcher; everything is also available from the command line.
+into a single file. Works on macOS and Windows: non-technical users just
+double-click a launcher; everything is also available from the command line.
 
 ## What's in the box
 
 | Item | What it is |
 | --- | --- |
-| **Make PDF.command** | Double-click launcher: pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, splitting). |
-| **Combine PDFs.command** | Double-click launcher: merges every PDF in a folder into one, in order. |
+| **Make PDF.command** / **Make PDF.bat** | Double-click launchers (macOS / Windows): pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, splitting). On Windows you can also drag a folder onto the icon. |
+| **Combine PDFs.command** / **Combine PDFs.bat** | Double-click launchers (macOS / Windows): merges every PDF in a folder into one, in order. |
+| `launcher.py` | The shared interactive flow behind all four launchers — first-run setup, the questions, and revealing the finished PDF. |
 | `generate_pdf.py` | The picture-to-PDF engine (Pillow + img2pdf). |
 | `combine_pdfs.py` | The PDF-merging engine (pypdf). |
 | `pictures/` | Three sample images so you can try it immediately. |
@@ -22,7 +23,10 @@ delete the folder.
 
 ## Prerequisites
 
-PDF Maker needs **Python 3**. Everything else it fetches for itself on first run.
+PDF Maker needs **Python 3** (3.9 or newer). Everything else it fetches for
+itself on first run.
+
+### macOS
 
 **Option A — python.org installer** (simplest, no terminal needed):
 download and run the ["macOS 64-bit universal2 installer"](https://www.python.org/downloads/macos/).
@@ -40,14 +44,22 @@ then install Python with it:
 brew install python
 ```
 
-Check it worked with `python3 --version` — any Python 3.9 or newer is fine.
+Check it worked with `python3 --version`.
+
+### Windows
+
+Download the latest ["Windows installer (64-bit)"](https://www.python.org/downloads/windows/)
+and run it. **On the first screen tick "Add python.exe to PATH"**, then click
+*Install Now*. Check it worked by opening Command Prompt and running
+`py --version`.
 
 ## Quick start (double-click)
 
 1. Install Python 3 (see Prerequisites above) — one time only.
 2. Put your pictures in the `pictures` folder (or have any folder ready).
-3. Double-click **Make PDF.command** and answer the prompts.
-   (First run: right-click → Open to get past Gatekeeper.)
+3. Double-click **Make PDF.command** (macOS) or **Make PDF.bat** (Windows) and
+   answer the prompts. First run only: on macOS right-click → Open to get past
+   Gatekeeper; on Windows click "More info" → "Run anyway" if SmartScreen asks.
 
 The PDF is saved next to your pictures folder. See **READ ME FIRST.html** for
 the full guide, including HEIC conversion tips and troubleshooting.
