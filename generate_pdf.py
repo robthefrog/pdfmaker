@@ -53,6 +53,32 @@ import os
 import re
 import sys
 
+# The live progress bar lives alongside this script; if it's ever missing
+# (e.g. this file was copied out on its own) fall back to a silent no-op so the
+# tool still runs exactly as before.
+try:
+    from progress import ProgressBar
+except Exception:
+    class ProgressBar:  # minimal stand-in: no bar, original behaviour
+        enabled = False
+
+        def __init__(self, *a, **k):
+            self.enabled = False
+
+        def step(self, item="", plain=None):
+            if plain is not None:
+                print(plain)
+
+        def note(self, text):
+            pass
+
+        def log(self, msg):
+            print(msg, file=sys.stderr)
+
+        def close(self):
+            pass
+
+
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff")
 PAGE_PRESETS = {"letter": (8.5, 11.0), "a4": (8.2677, 11.6929)}  # inches (w, h)
 # Known picture types we can't handle without an extra package — worth naming
@@ -138,7 +164,7 @@ def describe_error(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 # Plain (lossless) engines — used when no space/layout flags are given.
 # ---------------------------------------------------------------------------
-def prepare_sources(files: list[str], force_reencode: bool = False):
+def prepare_sources(files: list[str], force_reencode: bool = False, progress=None):
     """Turn each file into an img2pdf-ready source, skipping unreadable ones.
 
     Upright JPEG images in RGB/grayscale are passed through untouched (embedded
@@ -155,6 +181,8 @@ def prepare_sources(files: list[str], force_reencode: bool = False):
     from PIL import Image, ImageOps
     sources, skipped = [], []
     for p in files:
+        if progress is not None:
+            progress.step(os.path.basename(p))
         ext = os.path.splitext(p)[1].lower()
         try:
             with Image.open(p) as im:
@@ -177,11 +205,13 @@ def prepare_sources(files: list[str], force_reencode: bool = False):
     return sources, skipped
 
 
-def build_with_img2pdf(files: list[str], out_path: str, dpi: float):
+def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=None):
     import img2pdf
-    sources, skipped = prepare_sources(files)
+    sources, skipped = prepare_sources(files, progress=progress)
     if not sources:
         return 0, skipped
+    if progress is not None:
+        progress.note("assembling PDF")
     # Fix the DPI so every page is sized deterministically from its pixels
     # (page_inches = pixels / dpi), rather than depending on image metadata.
     layout = img2pdf.get_fixed_dpi_layout_fun((dpi, dpi))
@@ -190,6 +220,8 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float):
     except Exception:
         # A losslessly passed-through JPEG may be one img2pdf refuses. Re-encode
         # every image and retry so a single odd file can't sink the whole batch.
+        if progress is not None:
+            progress.note("re-encoding images")
         sources, skipped = prepare_sources(files, force_reencode=True)
         if not sources:
             return 0, skipped
@@ -202,10 +234,12 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float):
     return len(sources), skipped
 
 
-def build_with_pillow(files: list[str], out_path: str, dpi: float):
+def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None):
     from PIL import Image, ImageOps
     pages, skipped = [], []
     for p in files:
+        if progress is not None:
+            progress.step(os.path.basename(p))
         try:
             im = Image.open(p)
             im.load()
@@ -215,6 +249,8 @@ def build_with_pillow(files: list[str], out_path: str, dpi: float):
             skipped.append((p, describe_error(exc)))
     if not pages:
         return 0, skipped
+    if progress is not None:
+        progress.note("assembling PDF")
     pages[0].save(
         out_path, "PDF", save_all=True, append_images=pages[1:],
         resolution=float(dpi),
@@ -242,7 +278,7 @@ def page_inches(page_spec: str, native_px: tuple[int, int], dpi: float):
     sys.exit(f"error: --page must be 'match', 'letter', 'a4', or 'WxH' inches (got {page_spec!r})")
 
 
-def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg):
+def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, progress=None):
     """Render each image onto a page canvas; return (page_blobs, raster, skipped).
 
     Unreadable files are skipped and recorded in `skipped` as (path, reason).
@@ -296,6 +332,8 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg):
 
     blobs = []
     for p in files:
+        if progress is not None:
+            progress.step(os.path.basename(p))
         if p in bad:
             continue
         try:
@@ -343,7 +381,7 @@ def multiup_page_inches(page_spec: str):
     return max(w, h), min(w, h)
 
 
-def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, page_spec, bg):
+def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, page_spec, bg, progress=None):
     """Render `per_page` pictures across each landscape page (one row of cells).
 
     Pictures are placed left-to-right in file order, each scaled to fit its cell
@@ -408,6 +446,8 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
         group.clear()
 
     for p in files:
+        if progress is not None:
+            progress.step(os.path.basename(p))
         try:
             with Image.open(p) as im:
                 im.load()
@@ -431,7 +471,7 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
 
 
 def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
-          margin=0.0, page="match", bg="white", per_page=1, gap_cm=0.5):
+          margin=0.0, page="match", bg="white", per_page=1, gap_cm=0.5, progress=None):
     """Build one PDF. Returns (pages_written, skipped)."""
     if per_page > 1:
         # The N-per-page landscape layout is always a composed raster, so it
@@ -441,9 +481,11 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
         except ImportError:
             sys.exit("error: --per-page requires img2pdf (pip install img2pdf)")
         blobs, raster, skipped = compose_multiup_pages(
-            files, dpi, max_height, quality, per_page, gap_cm, page, bg)
+            files, dpi, max_height, quality, per_page, gap_cm, page, bg, progress=progress)
         if not blobs:
             return 0, skipped
+        if progress is not None:
+            progress.note("assembling PDF")
         layout = img2pdf.get_fixed_dpi_layout_fun((raster, raster))
         try:
             pdf = img2pdf.convert(blobs, layout_fun=layout)
@@ -456,16 +498,18 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
     advanced = bool(max_height) or bool(quality) or margin > 0 or page != "match"
     if not advanced:
         if engine == "img2pdf":
-            return build_with_img2pdf(files, out_path, dpi)
-        return build_with_pillow(files, out_path, dpi)
+            return build_with_img2pdf(files, out_path, dpi, progress=progress)
+        return build_with_pillow(files, out_path, dpi, progress=progress)
     try:
         import img2pdf
     except ImportError:
         sys.exit("error: --max-height/--quality/--margin/--page require img2pdf "
                  "(pip install img2pdf)")
-    blobs, raster, skipped = compose_pages(files, dpi, max_height, quality, margin, page, bg)
+    blobs, raster, skipped = compose_pages(files, dpi, max_height, quality, margin, page, bg, progress=progress)
     if not blobs:
         return 0, skipped
+    if progress is not None:
+        progress.note("assembling PDF")
     layout = img2pdf.get_fixed_dpi_layout_fun((raster, raster))
     try:
         pdf = img2pdf.convert(blobs, layout_fun=layout)
@@ -579,10 +623,13 @@ def main() -> None:
     all_skipped = []
     for i, chunk in enumerate(chunks, start=1):
         out = part_path(args.out, i, args.parts)
+        bar_label = f"Part {i}/{args.parts}" if args.parts > 1 else "Building PDF"
+        bar = ProgressBar(len(chunk), label=bar_label)
         pages_written, skipped = build(
             engine, chunk, out, args.dpi, max_height=args.max_height,
             quality=args.quality, margin=args.margin, page=args.page, bg=args.bg,
-            per_page=args.per_page, gap_cm=args.gap)
+            per_page=args.per_page, gap_cm=args.gap, progress=bar)
+        bar.close()
         all_skipped.extend(skipped)
         total_pages += pages_written
         label = f"part {i}/{args.parts}: " if args.parts > 1 else ""

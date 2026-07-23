@@ -47,6 +47,30 @@ except ImportError:
         "       Install it with:  python -m pip install pypdf"
     )
 
+# The live progress bar lives alongside this script; if it's ever missing fall
+# back to a silent no-op so the tool still runs exactly as before.
+try:
+    from progress import ProgressBar
+except Exception:
+    class ProgressBar:  # minimal stand-in: no bar, original behaviour
+        enabled = False
+
+        def __init__(self, *a, **k):
+            self.enabled = False
+
+        def step(self, item="", plain=None):
+            if plain is not None:
+                print(plain)
+
+        def note(self, text):
+            pass
+
+        def log(self, msg):
+            print(msg, file=sys.stderr)
+
+        def close(self):
+            pass
+
 
 def natural_key(path: str):
     """Order by the last run of digits in the filename, then the name itself.
@@ -101,7 +125,10 @@ def combine(files: list[str], out_path: str) -> tuple[int, int, list[str]]:
     used = 0
     pages = 0
     skipped: list[str] = []
+    bar = ProgressBar(len(files), label="Combining")
     for path in files:
+        name = os.path.basename(path)
+        bar.step(name)
         try:
             reader = PdfReader(path)
             if reader.is_encrypted:
@@ -117,15 +144,20 @@ def combine(files: list[str], out_path: str) -> tuple[int, int, list[str]]:
                 staged.add_page(page)
             n = len(staged.pages)
         except Exception as exc:  # noqa: BLE001 — report and keep going
-            print(f"WARNING: skipping {os.path.basename(path)!r} — "
-                  f"{describe_error(exc)}", file=sys.stderr)
+            msg = f"WARNING: skipping {name!r} — {describe_error(exc)}"
+            if bar.enabled:
+                bar.log(msg)
+            else:
+                print(msg, file=sys.stderr)
             skipped.append(path)
             continue
         for page in staged.pages:
             writer.add_page(page)
         used += 1
         pages += n
-        print(f"  added {os.path.basename(path)}  ({n} page{'s' if n != 1 else ''})")
+        if not bar.enabled:
+            print(f"  added {name}  ({n} page{'s' if n != 1 else ''})")
+    bar.close()
 
     if used == 0:
         sys.exit("error: no readable PDFs were found to combine.")
