@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Assemble a folder of pictures into PDF(s) — one image per page, in order.
 
-Reads image files from a source directory (default: "sample imagery"), sorts
+Reads image files from a source directory (default: "pictures"), sorts
 them by the number embedded in each filename (so sample_1 ... sample_100 land
 in ascending order regardless of zero-padding), and writes one image per page.
 
@@ -37,7 +37,7 @@ Three to a page (landscape)
     apply; --page picks the sheet, oriented landscape (default Letter).
 
 Usage:
-    python generate_pdf.py                                  # one PDF, 100 pages
+    python generate_pdf.py                                  # one PDF from every picture
     python generate_pdf.py --parts 3                        # 34 + 33 + 33
     python generate_pdf.py --max-height 1000 --quality 60   # compact single PDF
     python generate_pdf.py --page letter --margin 0.5 --quality 70   # note margins
@@ -90,7 +90,7 @@ def collect_images(src_dir: str):
     if not os.path.isdir(src_dir):
         sys.exit(f"error: source directory not found: {src_dir!r}")
     files, needs_plugin = [], []
-    for p in glob.glob(os.path.join(src_dir, "*")):
+    for p in glob.glob(os.path.join(glob.escape(src_dir), "*")):
         if not os.path.isfile(p):
             continue
         ext = os.path.splitext(p)[1].lower()
@@ -138,26 +138,36 @@ def describe_error(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 # Plain (lossless) engines — used when no space/layout flags are given.
 # ---------------------------------------------------------------------------
-def prepare_sources(files: list[str]):
+def prepare_sources(files: list[str], force_reencode: bool = False):
     """Turn each file into an img2pdf-ready source, skipping unreadable ones.
 
-    JPEG images in RGB/grayscale are passed through untouched (embedded
-    losslessly, no re-encode). Everything else is decoded with Pillow and
-    losslessly re-encoded to PNG bytes, which img2pdf reliably accepts — so a
-    folder mixing jpg/png/bmp/gif/tiff/webp all lands in the PDF.
+    Upright JPEG images in RGB/grayscale are passed through untouched (embedded
+    losslessly, no re-encode). Everything else — including any image carrying an
+    EXIF rotation — is decoded with Pillow, turned upright, and losslessly
+    re-encoded to PNG bytes, which img2pdf reliably accepts, so a folder mixing
+    jpg/png/bmp/gif/tiff/webp all lands in the PDF the right way up.
+
+    With force_reencode=True nothing is passed through: every image is decoded
+    and re-encoded (used as a fallback if img2pdf rejects a passed-through file).
 
     Returns (sources, skipped) where skipped is a list of (path, reason).
     """
-    from PIL import Image
+    from PIL import Image, ImageOps
     sources, skipped = [], []
     for p in files:
         ext = os.path.splitext(p)[1].lower()
         try:
             with Image.open(p) as im:
                 im.load()  # force a full decode: catches truncated/corrupt files
-                if ext in (".jpg", ".jpeg") and im.mode in ("RGB", "L"):
+                # Orientation 1 (or absent) means the stored pixels already show
+                # upright, so the JPEG bytes can be embedded as-is. Any other
+                # value (e.g. an iPhone portrait) must be baked in by re-encoding.
+                upright = im.getexif().get(0x0112, 1) == 1
+                if (not force_reencode and upright
+                        and ext in (".jpg", ".jpeg") and im.mode in ("RGB", "L")):
                     sources.append(p)
                 else:
+                    im = ImageOps.exif_transpose(im)
                     rgb = im if im.mode == "RGB" else im.convert("RGB")
                     buf = io.BytesIO()
                     rgb.save(buf, format="PNG")
@@ -177,20 +187,29 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float):
     layout = img2pdf.get_fixed_dpi_layout_fun((dpi, dpi))
     try:
         pdf = img2pdf.convert(sources, layout_fun=layout)
-    except Exception as exc:
-        sys.exit(f"error: could not assemble the PDF ({describe_error(exc)})")
+    except Exception:
+        # A losslessly passed-through JPEG may be one img2pdf refuses. Re-encode
+        # every image and retry so a single odd file can't sink the whole batch.
+        sources, skipped = prepare_sources(files, force_reencode=True)
+        if not sources:
+            return 0, skipped
+        try:
+            pdf = img2pdf.convert(sources, layout_fun=layout)
+        except Exception as exc:
+            sys.exit(f"error: could not assemble the PDF ({describe_error(exc)})")
     with open(out_path, "wb") as f:
         f.write(pdf)
     return len(sources), skipped
 
 
 def build_with_pillow(files: list[str], out_path: str, dpi: float):
-    from PIL import Image
+    from PIL import Image, ImageOps
     pages, skipped = [], []
     for p in files:
         try:
             im = Image.open(p)
             im.load()
+            im = ImageOps.exif_transpose(im)  # honour EXIF rotation (phone photos)
             pages.append(im if im.mode == "RGB" else im.convert("RGB"))
         except Exception as exc:
             skipped.append((p, describe_error(exc)))
@@ -228,9 +247,12 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg):
 
     Unreadable files are skipped and recorded in `skipped` as (path, reason).
     raster (pixels-per-inch) is chosen so the physical page equals the requested
-    size regardless of pixel count, sized from the first readable image.
+    size regardless of pixel count, sized from the first readable image. Every
+    image is then scaled to fit within the margins (aspect kept, centred, never
+    cropped), so a picture with more pixels than the first one shrinks onto the
+    page instead of overflowing it.
     """
-    from PIL import Image
+    from PIL import Image, ImageOps
 
     try:
         Image.new("RGB", (1, 1), bg)
@@ -250,6 +272,7 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg):
         try:
             with Image.open(p) as im:
                 im.load()
+                im = ImageOps.exif_transpose(im)
                 native = im.size
                 ref_size = downscale(im.convert("RGB")).size
             break
@@ -266,6 +289,10 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg):
     raster = riw / avail_w if (riw / rih) > (avail_w / avail_h) else rih / avail_h
     w_px = max(1, round(pw_in * raster))
     h_px = max(1, round(ph_in * raster))
+    # The printable box in pixels. Each image is scaled to fit inside it so a
+    # picture with more pixels than the reference can't overrun the page/margins.
+    avail_w_px = avail_w * raster
+    avail_h_px = avail_h * raster
 
     blobs = []
     for p in files:
@@ -274,7 +301,12 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg):
         try:
             with Image.open(p) as im:
                 im.load()
+                im = ImageOps.exif_transpose(im)
                 im = downscale(im if im.mode == "RGB" else im.convert("RGB"))
+                fit = min(1.0, avail_w_px / im.width, avail_h_px / im.height)
+                if fit < 1.0:
+                    im = im.resize((max(1, round(im.width * fit)),
+                                    max(1, round(im.height * fit))), Image.LANCZOS)
                 canvas = Image.new("RGB", (w_px, h_px), bg)
                 canvas.paste(im, (round((w_px - im.width) / 2), round((h_px - im.height) / 2)))
                 buf = io.BytesIO()
@@ -320,7 +352,7 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
     as (path, reason); the readable ones still flow into full pages. Returns
     (page_blobs, raster, skipped) exactly like compose_pages.
     """
-    from PIL import Image
+    from PIL import Image, ImageOps
 
     try:
         Image.new("RGB", (1, 1), bg)
@@ -379,6 +411,7 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
         try:
             with Image.open(p) as im:
                 im.load()
+                im = ImageOps.exif_transpose(im)
                 im = downscale(im if im.mode == "RGB" else im.convert("RGB"))
                 ensure_geometry(im.width, im.height)
                 s = min(state["cell_w"] / im.width, state["cell_h"] / im.height)
@@ -459,9 +492,9 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument("--src", default=os.path.join(here, "sample imagery"),
-                    help='source image directory (default: "sample imagery")')
-    ap.add_argument("--out", default=os.path.join(here, "sample_imagery.pdf"),
+    ap.add_argument("--src", default=os.path.join(here, "pictures"),
+                    help='source image directory (default: "pictures")')
+    ap.add_argument("--out", default=os.path.join(here, "pictures.pdf"),
                     help="output PDF path; for --parts>1 a _partX_of_N suffix is added")
     ap.add_argument("--parts", "-n", type=int, default=1, metavar="N",
                     help="split the images evenly into N separate PDFs (default: 1)")

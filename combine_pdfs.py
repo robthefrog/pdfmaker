@@ -68,7 +68,7 @@ def collect_pdfs(src_dir: str, out_path: str, order: str) -> list[str]:
         sys.exit(f"error: source folder not found: {src_dir!r}")
     out_abs = os.path.abspath(out_path)
     files = []
-    for p in glob.glob(os.path.join(src_dir, "*")):
+    for p in glob.glob(os.path.join(glob.escape(src_dir), "*")):
         if not os.path.isfile(p):
             continue
         if os.path.splitext(p)[1].lower() != ".pdf":
@@ -109,14 +109,20 @@ def combine(files: list[str], out_path: str) -> tuple[int, int, list[str]]:
                 # transparently so they still combine without prompting.
                 if reader.decrypt("") == 0:
                     raise PdfReadError("password-protected")
-            n = len(reader.pages)
+            # Stage this file's pages in a scratch writer first: if a page fails
+            # to parse partway through, we skip the whole file cleanly instead of
+            # leaving half of it in the output while reporting it as skipped.
+            staged = PdfWriter()
             for page in reader.pages:
-                writer.add_page(page)
+                staged.add_page(page)
+            n = len(staged.pages)
         except Exception as exc:  # noqa: BLE001 — report and keep going
             print(f"WARNING: skipping {os.path.basename(path)!r} — "
                   f"{describe_error(exc)}", file=sys.stderr)
             skipped.append(path)
             continue
+        for page in staged.pages:
+            writer.add_page(page)
         used += 1
         pages += n
         print(f"  added {os.path.basename(path)}  ({n} page{'s' if n != 1 else ''})")

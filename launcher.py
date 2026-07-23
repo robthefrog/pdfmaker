@@ -142,8 +142,13 @@ def recover_trailing_space(folder: str) -> str:
 
 
 def choose_folder(argv_folder: str | None, what: str) -> str:
-    if argv_folder and os.path.isdir(argv_folder):
-        return argv_folder
+    if argv_folder:
+        # A path dragged onto the .command/.bat icon can arrive quoted, escaped,
+        # or with a trailing separator — clean it the same way typed input is, so
+        # `folder + ".pdf"` can't turn into a stray ".pdf" inside the folder.
+        argv_folder = recover_trailing_space(clean_dropped_path(argv_folder))
+        if os.path.isdir(argv_folder):
+            return argv_folder
     print("Which folder of %s?" % what)
     print("   - DRAG the folder into this window and press Return, or")
     print("   - just press Return to use the 'pictures' folder next to this launcher.")
