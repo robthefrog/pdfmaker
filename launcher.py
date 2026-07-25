@@ -25,6 +25,14 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMPORT_CHECK = "import img2pdf, PIL, pypdf"
 PIP_PACKAGES = ("img2pdf", "Pillow", "pypdf")
+# Newer img2pdf releases depend on pikepdf, a compiled component whose
+# prebuilt wheels don't cover every machine (e.g. Intel Macs on macOS
+# older than 15). Compiling it needs the qpdf C++ library, which normal
+# users won't have, so the install must never attempt that. img2pdf 0.3.6
+# is the newest release with no pikepdf dependency: pure Python, installs
+# on any platform, and supports everything generate_pdf.py uses.
+PIP_NO_COMPILE = ("--only-binary", "pikepdf")
+PIP_PACKAGES_FALLBACK = ("img2pdf==0.3.6", "Pillow", "pypdf")
 INTERACTIVE = sys.stdin.isatty()
 
 
@@ -70,8 +78,14 @@ def ensure_environment() -> None:
             fail("Setup failed creating the environment.")
         subprocess.run([vp, "-m", "pip", "install", "--quiet",
                         "--upgrade", "pip"])
+        # With pikepdf restricted to prebuilt wheels, pip picks the newest
+        # img2pdf that works on this machine (falling back to 0.3.6 where no
+        # pikepdf wheel fits) instead of failing on a doomed compile.
         r = subprocess.run([vp, "-m", "pip", "install", "--quiet",
-                            *PIP_PACKAGES])
+                            *PIP_NO_COMPILE, *PIP_PACKAGES])
+        if r.returncode != 0:
+            r = subprocess.run([vp, "-m", "pip", "install", "--quiet",
+                                *PIP_PACKAGES_FALLBACK])
         if r.returncode != 0:
             fail("Couldn't download the needed components. Please check your\n"
                  "internet connection and try again.")
