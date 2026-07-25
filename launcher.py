@@ -71,7 +71,9 @@ def ensure_environment() -> None:
         return
     vp = venv_python()
     if not (os.path.exists(vp) and deps_ok(vp)):
-        print("Setting things up for the first time (about a minute)...")
+        # The "setup v2" tag identifies this launcher version in screenshots
+        # of failed first runs, where nothing else distinguishes releases.
+        print("Setting things up for the first time (about a minute)... [setup v2]")
         r = subprocess.run([sys.executable, "-m", "venv",
                             os.path.join(HERE, ".venv")])
         if r.returncode != 0 or not os.path.exists(vp):
