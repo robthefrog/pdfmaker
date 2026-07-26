@@ -43,9 +43,9 @@ PDF Maker needs **Python**, a free program. Install it once:
 2. Double-click **Make PDF** (**.command** on a Mac, **.bat** on Windows).
 3. When it asks for a folder, just press <kbd>Return</kbd> (or drag a different folder in).
 4. It asks a few quick questions — **pictures per page** (one, or three to a
-   landscape page), **note margins** / **spacing**, **file size**, and
-   **how many PDF files** (all explained below). Press <kbd>Return</kbd> for the
-   normal choice each time.
+   landscape page), **note margins** / **spacing**, **file size**, **page
+   numbers**, and **how many PDF files** (all explained below). Press
+   <kbd>Return</kbd> for the normal choice each time.
 5. Your PDF pops up next to the folder (e.g. `pictures.pdf`).
 
 > 🔒 **The very first time you open it** (especially after downloading the zip),
@@ -146,6 +146,24 @@ The last question, *"How many PDF files?"*, can divide your pictures into
 **1, 2, or 4** separate PDFs of roughly equal size — useful when one file is too big to
 email, or a print shop won't take it. The pictures stay in order, split evenly, and the files
 are named `…_part1_of_2.pdf`, `…_part2_of_2.pdf`, and so on.
+
+## Page numbers in a corner 🔢
+
+PDF Maker can stamp a small page number — **0001, 0002, 0003, …** — in a corner of
+every page. It's printed in a soft grey **right on top of the picture**, so it stays
+put when the PDF is printed or re-scanned. Pages are left untouched unless you ask.
+
+When it asks *"Do you want a page number stamped on every page?"*, pick:
+
+| Your choice | What you get |
+| --- | --- |
+| **1) No** (default) | Clean pages, exactly as before. |
+| **2) Yes — bottom right** | The usual spot. |
+| **3–5) Yes — other corners** | Bottom left, top right, or top left instead. |
+
+If you also split into several PDFs, the numbers **keep counting across the files** —
+part 2 carries on where part 1 stopped. In the Terminal (see §7) this is
+`--number-pages`, plus `--number-corner top-left` (etc.) to pick a different corner.
 
 ## 6 · Which picture types work 🖼️
 

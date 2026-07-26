@@ -36,9 +36,18 @@ Three to a page (landscape)
     space/size flags above (--max-height, --quality, --parts, --page, --bg) still
     apply; --page picks the sheet, oriented landscape (default Letter).
 
+Page numbers (optional)
+    --number-pages burns a small neutral-grey page number (0001, 0002, ...) onto
+    each page, over the content, so it survives printing and re-scanning.
+    --number-corner picks the corner (bottom-right by default; also bottom-left,
+    top-right, top-left) and implies --number-pages. Numbers continue across
+    --parts files. Stamped JPEGs are re-encoded at quality 90.
+
 Usage:
     python generate_pdf.py                                  # one PDF from every picture
     python generate_pdf.py --parts 3                        # 34 + 33 + 33
+    python generate_pdf.py --number-pages                   # 0001... bottom right
+    python generate_pdf.py --number-corner top-left         # 0001... top left
     python generate_pdf.py --max-height 1000 --quality 60   # compact single PDF
     python generate_pdf.py --page letter --margin 0.5 --quality 70   # note margins
     python generate_pdf.py --per-page 3                     # 3 across, landscape
@@ -162,9 +171,43 @@ def describe_error(exc: Exception) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Optional burned-in page numbers
+# ---------------------------------------------------------------------------
+NUMBER_CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
+
+
+def stamp_page_number(im, number: int, corner: str):
+    """Burn a zero-padded page number ("0001") into one corner of a page.
+
+    Drawn onto the pixels themselves, so it sits on top of the content and
+    prints exactly as shown. Neutral mid-grey with a thin white outline keeps
+    it readable over both dark photos and white paper. The text height scales
+    with the page so it stays proportional at any raster size.
+    """
+    from PIL import ImageDraw, ImageFont
+    text = str(number).zfill(4)
+    size = max(12, round(min(im.size) * 0.03))
+    try:
+        font = ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1: fixed-size bitmap font, still legible
+        font = ImageFont.load_default()
+    stroke = max(1, size // 14)
+    draw = ImageDraw.Draw(im)
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font,
+                                             stroke_width=stroke)
+    pad = max(6, size // 2)
+    x = pad - left if "left" in corner else im.width - pad - right
+    y = pad - top if "top" in corner else im.height - pad - bottom
+    draw.text((x, y), text, font=font, fill=(128, 128, 128),
+              stroke_width=stroke, stroke_fill=(255, 255, 255))
+    return im
+
+
+# ---------------------------------------------------------------------------
 # Plain (lossless) engines — used when no space/layout flags are given.
 # ---------------------------------------------------------------------------
-def prepare_sources(files: list[str], force_reencode: bool = False, progress=None):
+def prepare_sources(files: list[str], force_reencode: bool = False, progress=None,
+                    number_start: int = 0, number_corner: str = "bottom-right"):
     """Turn each file into an img2pdf-ready source, skipping unreadable ones.
 
     Upright JPEG images in RGB/grayscale are passed through untouched (embedded
@@ -175,6 +218,11 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
 
     With force_reencode=True nothing is passed through: every image is decoded
     and re-encoded (used as a fallback if img2pdf rejects a passed-through file).
+
+    number_start > 0 stamps page numbers (number_start, number_start+1, ...)
+    into number_corner. Stamping changes pixels, so nothing can pass through:
+    JPEGs re-encode as JPEG quality 90 (visually identical, sanely sized)
+    rather than ballooning into PNGs; everything else stays lossless PNG.
 
     Returns (sources, skipped) where skipped is a list of (path, reason).
     """
@@ -191,23 +239,32 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
                 # upright, so the JPEG bytes can be embedded as-is. Any other
                 # value (e.g. an iPhone portrait) must be baked in by re-encoding.
                 upright = im.getexif().get(0x0112, 1) == 1
-                if (not force_reencode and upright
+                if (not force_reencode and not number_start and upright
                         and ext in (".jpg", ".jpeg") and im.mode in ("RGB", "L")):
                     sources.append(p)
                 else:
                     im = ImageOps.exif_transpose(im)
                     rgb = im if im.mode == "RGB" else im.convert("RGB")
+                    if number_start:
+                        stamp_page_number(rgb, number_start + len(sources),
+                                          number_corner)
                     buf = io.BytesIO()
-                    rgb.save(buf, format="PNG")
+                    if number_start and ext in (".jpg", ".jpeg"):
+                        rgb.save(buf, format="JPEG", quality=90)
+                    else:
+                        rgb.save(buf, format="PNG")
                     sources.append(buf.getvalue())
         except Exception as exc:
             skipped.append((p, describe_error(exc)))
     return sources, skipped
 
 
-def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=None):
+def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=None,
+                       number_start: int = 0, number_corner: str = "bottom-right"):
     import img2pdf
-    sources, skipped = prepare_sources(files, progress=progress)
+    sources, skipped = prepare_sources(files, progress=progress,
+                                       number_start=number_start,
+                                       number_corner=number_corner)
     if not sources:
         return 0, skipped
     if progress is not None:
@@ -222,7 +279,9 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=Non
         # every image and retry so a single odd file can't sink the whole batch.
         if progress is not None:
             progress.note("re-encoding images")
-        sources, skipped = prepare_sources(files, force_reencode=True)
+        sources, skipped = prepare_sources(files, force_reencode=True,
+                                           number_start=number_start,
+                                           number_corner=number_corner)
         if not sources:
             return 0, skipped
         try:
@@ -234,7 +293,8 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=Non
     return len(sources), skipped
 
 
-def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None):
+def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None,
+                      number_start: int = 0, number_corner: str = "bottom-right"):
     from PIL import Image, ImageOps
     pages, skipped = [], []
     for p in files:
@@ -244,7 +304,10 @@ def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None
             im = Image.open(p)
             im.load()
             im = ImageOps.exif_transpose(im)  # honour EXIF rotation (phone photos)
-            pages.append(im if im.mode == "RGB" else im.convert("RGB"))
+            im = im if im.mode == "RGB" else im.convert("RGB")
+            if number_start:
+                stamp_page_number(im, number_start + len(pages), number_corner)
+            pages.append(im)
         except Exception as exc:
             skipped.append((p, describe_error(exc)))
     if not pages:
@@ -278,7 +341,8 @@ def page_inches(page_spec: str, native_px: tuple[int, int], dpi: float):
     sys.exit(f"error: --page must be 'match', 'letter', 'a4', or 'WxH' inches (got {page_spec!r})")
 
 
-def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, progress=None):
+def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, progress=None,
+                  number_start=0, number_corner="bottom-right"):
     """Render each image onto a page canvas; return (page_blobs, raster, skipped).
 
     Unreadable files are skipped and recorded in `skipped` as (path, reason).
@@ -347,6 +411,8 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, pro
                                     max(1, round(im.height * fit))), Image.LANCZOS)
                 canvas = Image.new("RGB", (w_px, h_px), bg)
                 canvas.paste(im, (round((w_px - im.width) / 2), round((h_px - im.height) / 2)))
+                if number_start:
+                    stamp_page_number(canvas, number_start + len(blobs), number_corner)
                 buf = io.BytesIO()
                 if quality:
                     canvas.save(buf, "JPEG", quality=quality, optimize=True)
@@ -381,7 +447,8 @@ def multiup_page_inches(page_spec: str):
     return max(w, h), min(w, h)
 
 
-def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, page_spec, bg, progress=None):
+def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, page_spec, bg, progress=None,
+                          number_start=0, number_corner="bottom-right"):
     """Render `per_page` pictures across each landscape page (one row of cells).
 
     Pictures are placed left-to-right in file order, each scaled to fit its cell
@@ -437,6 +504,8 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
             x = cell_x + (state["cell_w"] - tile.width) // 2
             y = state["gap_px"] + (state["cell_h"] - tile.height) // 2
             canvas.paste(tile, (x, y))
+        if number_start:
+            stamp_page_number(canvas, number_start + len(blobs), number_corner)
         buf = io.BytesIO()
         if quality:
             canvas.save(buf, "JPEG", quality=quality, optimize=True)
@@ -471,8 +540,13 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
 
 
 def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
-          margin=0.0, page="match", bg="white", per_page=1, gap_cm=0.5, progress=None):
-    """Build one PDF. Returns (pages_written, skipped)."""
+          margin=0.0, page="match", bg="white", per_page=1, gap_cm=0.5, progress=None,
+          number_start=0, number_corner="bottom-right"):
+    """Build one PDF. Returns (pages_written, skipped).
+
+    number_start > 0 burns page numbers onto the pages, starting at that
+    value (0001-style), into number_corner; 0 leaves pages untouched.
+    """
     if per_page > 1:
         # The N-per-page landscape layout is always a composed raster, so it
         # needs img2pdf just like the other space/layout options below.
@@ -481,7 +555,8 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
         except ImportError:
             sys.exit("error: --per-page requires img2pdf (pip install img2pdf)")
         blobs, raster, skipped = compose_multiup_pages(
-            files, dpi, max_height, quality, per_page, gap_cm, page, bg, progress=progress)
+            files, dpi, max_height, quality, per_page, gap_cm, page, bg, progress=progress,
+            number_start=number_start, number_corner=number_corner)
         if not blobs:
             return 0, skipped
         if progress is not None:
@@ -498,14 +573,19 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
     advanced = bool(max_height) or bool(quality) or margin > 0 or page != "match"
     if not advanced:
         if engine == "img2pdf":
-            return build_with_img2pdf(files, out_path, dpi, progress=progress)
-        return build_with_pillow(files, out_path, dpi, progress=progress)
+            return build_with_img2pdf(files, out_path, dpi, progress=progress,
+                                      number_start=number_start,
+                                      number_corner=number_corner)
+        return build_with_pillow(files, out_path, dpi, progress=progress,
+                                 number_start=number_start,
+                                 number_corner=number_corner)
     try:
         import img2pdf
     except ImportError:
         sys.exit("error: --max-height/--quality/--margin/--page require img2pdf "
                  "(pip install img2pdf)")
-    blobs, raster, skipped = compose_pages(files, dpi, max_height, quality, margin, page, bg, progress=progress)
+    blobs, raster, skipped = compose_pages(files, dpi, max_height, quality, margin, page, bg, progress=progress,
+                                           number_start=number_start, number_corner=number_corner)
     if not blobs:
         return 0, skipped
     if progress is not None:
@@ -563,9 +643,19 @@ def main() -> None:
     ap.add_argument("--gap", type=float, default=0.5, metavar="CM",
                     help="for --per-page>1: blank border and spacing between the "
                          "pictures, in centimetres (default: 0.5)")
+    ap.add_argument("--number-pages", action="store_true",
+                    help="burn a page number (0001, 0002, ...) onto each page, "
+                         "on top of the picture; numbers run on across --parts")
+    ap.add_argument("--number-corner", choices=list(NUMBER_CORNERS), default=None,
+                    metavar="CORNER",
+                    help="corner for the page number: bottom-right (default), "
+                         "bottom-left, top-right or top-left; implies --number-pages")
     ap.add_argument("--engine", choices=["auto", "img2pdf", "pillow"], default="auto",
                     help="PDF engine for the plain lossless case (default: auto)")
     args = ap.parse_args()
+    if args.number_corner and not args.number_pages:
+        args.number_pages = True
+    number_corner = args.number_corner or "bottom-right"
 
     files, needs_plugin = collect_images(args.src)
     if needs_plugin:
@@ -609,6 +699,8 @@ def main() -> None:
         notes.append(f"margin {args.margin:g}in")
     if args.page != "match":
         notes.append(f"page {args.page}")
+    if args.number_pages:
+        notes.append(f"page numbers (0001...) {number_corner}")
     if notes:
         print("options:", ", ".join(notes))
 
@@ -628,7 +720,11 @@ def main() -> None:
         pages_written, skipped = build(
             engine, chunk, out, args.dpi, max_height=args.max_height,
             quality=args.quality, margin=args.margin, page=args.page, bg=args.bg,
-            per_page=args.per_page, gap_cm=args.gap, progress=bar)
+            per_page=args.per_page, gap_cm=args.gap, progress=bar,
+            # Numbers continue across parts: the next part picks up right
+            # after the pages already written (skipped files leave no gap).
+            number_start=(1 + total_pages) if args.number_pages else 0,
+            number_corner=number_corner)
         bar.close()
         all_skipped.extend(skipped)
         total_pages += pages_written

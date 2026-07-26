@@ -268,6 +268,24 @@ def make_flow(argv_folder: str | None) -> None:
         opts += ["--max-height", "1000", "--quality", "55"]
     print()
 
+    print("Do you want a page number stamped on every page (0001, 0002, ...)?")
+    print("It is printed in a corner, on top of the picture, in a soft grey.")
+    print("   1) No                 (default)")
+    print("   2) Yes - bottom right")
+    print("   3) Yes - bottom left")
+    print("   4) Yes - top right")
+    print("   5) Yes - top left")
+    numbers = ask("Choose 1-5 [1]: ").strip()
+    if numbers == "2":
+        opts += ["--number-pages"]
+    elif numbers == "3":
+        opts += ["--number-corner", "bottom-left"]
+    elif numbers == "4":
+        opts += ["--number-corner", "top-right"]
+    elif numbers == "5":
+        opts += ["--number-corner", "top-left"]
+    print()
+
     print("How many PDF files do you want? Splitting divides the pictures evenly")
     print("(keeping their order) - handy when one file is too big to email or print.")
     print("   1 = one PDF    (default)")

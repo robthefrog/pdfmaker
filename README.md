@@ -9,7 +9,7 @@ double-click a launcher; everything is also available from the command line.
 
 | Item | What it is |
 | --- | --- |
-| **Make PDF.command** / **Make PDF.bat** | Double-click launchers (macOS / Windows): pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, splitting). On Windows you can also drag a folder onto the icon. |
+| **Make PDF.command** / **Make PDF.bat** | Double-click launchers (macOS / Windows): pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, page numbers, splitting). On Windows you can also drag a folder onto the icon. |
 | **Combine PDFs.command** / **Combine PDFs.bat** | Double-click launchers (macOS / Windows): merges every PDF in a folder into one, in order. |
 | `launcher.py` | The shared interactive flow behind all four launchers — first-run setup, the questions, and revealing the finished PDF. |
 | `generate_pdf.py` | The picture-to-PDF engine (Pillow + img2pdf). |
@@ -85,6 +85,10 @@ python3 generate_pdf.py --src "path/to/pictures" --per-page 3 --gap 0.5
 # Split evenly into 3 PDFs (print shops, email limits):
 python3 generate_pdf.py --src "path/to/pictures" --parts 3
 
+# Burn a page number (0001, 0002, ...) into a corner of every page:
+python3 generate_pdf.py --src "path/to/pictures" --number-pages
+python3 generate_pdf.py --src "path/to/pictures" --number-corner top-left
+
 # Merge a folder of PDFs, ordered by the number in each filename:
 python3 combine_pdfs.py --src "path/to/pdfs"
 ```
@@ -99,6 +103,8 @@ Run either script with `--help` for every option.
   the PDF is still built from the rest.
 - Supported picture types: JPG, PNG, BMP, GIF, TIFF, WEBP — and HEIC/HEIF if
   `pillow-heif` is installed.
+- Optional page numbers (0001, 0002, …) are burned into the pages themselves in a
+  neutral grey, in any corner, and keep counting across `--parts` files.
 
 ## License
 
