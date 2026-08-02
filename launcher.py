@@ -182,19 +182,19 @@ def choose_folder(argv_folder: str | None, what: str) -> str:
     print("   - DRAG the folder into this window and press Return, or")
     print("   - just press Return to use the 'pictures' folder next to this launcher.")
     print()
-    folder = clean_dropped_path(ask("Folder: "))
-    folder = recover_trailing_space(folder)
-    if not folder:
-        folder = os.path.join(HERE, "pictures")
-        os.makedirs(folder, exist_ok=True)
-    if not os.path.isdir(folder):
+    while True:
+        folder = clean_dropped_path(ask("Folder: "))
+        folder = recover_trailing_space(folder)
+        if not folder:
+            # Empty also covers EOF (closed stdin), so this loop always ends.
+            folder = os.path.join(HERE, "pictures")
+            os.makedirs(folder, exist_ok=True)
+        if os.path.isdir(folder):
+            return folder
         print()
         print("I couldn't find that folder:")
         print("   " + folder)
-        print("Please try again and drag the folder in, or press Return for 'pictures'.")
-        pause()
-        sys.exit(1)
-    return folder
+        print("Please drag the folder in and press Return, or press Return alone for 'pictures'.")
 
 
 # ---------------------------------------------------------------------------
@@ -332,8 +332,6 @@ def make_flow(argv_folder: str | None) -> None:
         print()
         print("Something went wrong - please read the message just above for the reason.")
         print("(A common cause is a folder with no .jpg/.png pictures in it.)")
-    print()
-    pause()
 
 
 def combine_flow(argv_folder: str | None) -> None:
@@ -362,8 +360,13 @@ def combine_flow(argv_folder: str | None) -> None:
         print()
         print("Something went wrong - please read the message just above for the reason.")
         print("(A common cause is a folder with no .pdf files in it.)")
+
+
+def another_round() -> bool:
+    """Offer to run again so several folders don't need several launches."""
     print()
-    pause()
+    answer = ask("Do another folder? (y/n) [n]: ").strip().lower()
+    return answer in ("y", "yes")
 
 
 def main() -> None:
@@ -373,10 +376,14 @@ def main() -> None:
     ensure_environment()
     greet()
     argv_folder = sys.argv[2] if len(sys.argv) > 2 else None
-    if mode == "combine":
-        combine_flow(argv_folder)
-    else:
-        make_flow(argv_folder)
+    flow = combine_flow if mode == "combine" else make_flow
+    while True:
+        flow(argv_folder)
+        argv_folder = None  # every further round asks for (or takes a drag of) a folder
+        if not another_round():
+            break
+    print()
+    pause()
 
 
 if __name__ == "__main__":
