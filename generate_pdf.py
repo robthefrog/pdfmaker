@@ -161,7 +161,10 @@ def find_image_folders(src_dir: str, exclude_dir: str | None = None):
     path under src_dir as a tuple (empty for src_dir itself), ordered by path
     with the same natural number sort used for files. Hidden (dot-prefixed)
     folders, SKIP_DIR_NAMES and exclude_dir (the output folder, so a re-run
-    never scans its own results) are not entered.
+    never scans its own results) are not entered. Dot-prefixed files
+    (.DS_Store, "._IMG.jpg" AppleDouble forks) don't count as pictures here,
+    matching collect_images, whose glob never matches hidden files — else a
+    junk-only folder would be "found" and then turn out to hold nothing.
     """
     src_dir = os.path.abspath(src_dir)
     exclude = os.path.realpath(exclude_dir) if exclude_dir else None
@@ -172,7 +175,8 @@ def find_image_folders(src_dir: str, exclude_dir: str | None = None):
             if not d.startswith(".") and d not in SKIP_DIR_NAMES
             and (exclude is None
                  or os.path.realpath(os.path.join(dirpath, d)) != exclude))
-        if any(f.lower().endswith(IMAGE_EXTS) for f in filenames):
+        if any(not f.startswith(".") and f.lower().endswith(IMAGE_EXTS)
+               for f in filenames):
             rel = os.path.relpath(dirpath, src_dir)
             parts = () if rel == "." else tuple(rel.split(os.sep))
             found.append((dirpath, parts))
@@ -849,6 +853,8 @@ def main() -> None:
         for i, ((folder, _), name) in enumerate(zip(folders, names), start=1):
             files, needs_plugin = collect_images(folder)
             note_needs_plugin(needs_plugin)
+            if not files:  # e.g. pictures deleted between the scan and now
+                continue
             stem = name[:-len(".pdf")]
             print(f"[{i}/{n}] {stem}")
             parts = min(args.parts, len(files))
