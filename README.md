@@ -117,6 +117,17 @@ Run either script with `--help` for every option.
 - Hidden files and folders (`.DS_Store`, `._*` AppleDouble forks) and zip
   leftovers like `__MACOSX` are ignored outright — no warnings, no blank pages.
 
+## Tests
+
+```bash
+python3 tests/run_all.py
+```
+
+Runs the whole suite: the engine's folder-batch mode and the interactive
+launchers, driven end-to-end with scripted answers. The tests borrow the
+project's own `.venv` (run a launcher once first) and build all fixtures in a
+temporary folder — nothing in the repo is touched.
+
 ## License
 
 [MIT](LICENSE)
