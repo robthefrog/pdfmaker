@@ -116,6 +116,19 @@ def pause() -> None:
         pass
 
 
+# Plain ASCII so it renders in any console (old Windows code pages included).
+FROG = r"""
+  @..@
+ (----)      Ribbit! Welcome to PDF Maker.
+( >__< )
+^^ ~~ ^^
+"""
+
+
+def greet() -> None:
+    print(FROG)
+
+
 def banner(title: str) -> None:
     print("============================================")
     print("   " + title)
@@ -358,6 +371,7 @@ def main() -> None:
     if mode not in ("make", "combine"):
         sys.exit("usage: python launcher.py [make|combine] [folder]")
     ensure_environment()
+    greet()
     argv_folder = sys.argv[2] if len(sys.argv) > 2 else None
     if mode == "combine":
         combine_flow(argv_folder)
