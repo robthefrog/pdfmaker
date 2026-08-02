@@ -43,9 +43,21 @@ Page numbers (optional)
     top-right, top-left) and implies --number-pages. Numbers continue across
     --parts files. Stamped JPEGs are re-encoded at quality 90.
 
+A whole directory of folders (batch)
+    --recursive walks the source folder and writes one PDF per folder that
+    directly holds pictures (the top folder included), each named after its
+    folder — holiday/beach -> beach.pdf. --out then names the output FOLDER
+    (default: "<src> PDFs" next to the source). Hidden folders and zip
+    artefacts like __MACOSX are ignored; two folders sharing a name get their
+    path baked in ("2023 - photos.pdf"). Every other option applies to each
+    folder's PDF independently (--parts splits each one, page numbers restart
+    at 0001), and a folder whose pictures can't be read is reported and
+    skipped without stopping the rest of the batch.
+
 Usage:
     python generate_pdf.py                                  # one PDF from every picture
     python generate_pdf.py --parts 3                        # 34 + 33 + 33
+    python generate_pdf.py --recursive --src scans          # one PDF per folder
     python generate_pdf.py --number-pages                   # 0001... bottom right
     python generate_pdf.py --number-corner top-left         # 0001... top left
     python generate_pdf.py --max-height 1000 --quality 60   # compact single PDF
@@ -135,6 +147,65 @@ def collect_images(src_dir: str):
             needs_plugin.append(p)
     files.sort(key=natural_key)
     return files, needs_plugin
+
+
+# Never descend into these during --recursive: zip-extraction artefacts and
+# Python caches hold no user pictures (or, worse, unreadable AppleDouble junk).
+SKIP_DIR_NAMES = {"__MACOSX", "__pycache__"}
+
+
+def find_image_folders(src_dir: str, exclude_dir: str | None = None):
+    """Every folder under src_dir that directly holds pictures, src_dir first.
+
+    Returns a list of (dir_path, rel_parts) where rel_parts is the folder's
+    path under src_dir as a tuple (empty for src_dir itself), ordered by path
+    with the same natural number sort used for files. Hidden (dot-prefixed)
+    folders, SKIP_DIR_NAMES and exclude_dir (the output folder, so a re-run
+    never scans its own results) are not entered.
+    """
+    src_dir = os.path.abspath(src_dir)
+    exclude = os.path.realpath(exclude_dir) if exclude_dir else None
+    found = []
+    for dirpath, dirnames, filenames in os.walk(src_dir):
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if not d.startswith(".") and d not in SKIP_DIR_NAMES
+            and (exclude is None
+                 or os.path.realpath(os.path.join(dirpath, d)) != exclude))
+        if any(f.lower().endswith(IMAGE_EXTS) for f in filenames):
+            rel = os.path.relpath(dirpath, src_dir)
+            parts = () if rel == "." else tuple(rel.split(os.sep))
+            found.append((dirpath, parts))
+    found.sort(key=lambda fp: tuple(natural_key(part) for part in fp[1]))
+    return found
+
+
+def pdf_names_for(folders, src_dir: str) -> list[str]:
+    """A distinct output filename for each folder from find_image_folders.
+
+    Plain "<folder name>.pdf" whenever that is unambiguous. Folders sharing a
+    name fall back to their path under the source joined with " - "
+    ("2023 - photos.pdf"); a numeric suffix is the last resort, so the result
+    is always collision-free.
+    """
+    src_name = os.path.basename(os.path.abspath(src_dir)) or "pictures"
+    bases = [(parts[-1] if parts else src_name) for _, parts in folders]
+    counts: dict[str, int] = {}
+    for b in bases:
+        counts[b] = counts.get(b, 0) + 1
+    names, seen = [], set()
+    for (_, parts), base in zip(folders, bases):
+        name = base
+        if counts[base] > 1 and parts:
+            name = " - ".join(parts)
+        if name in seen:
+            k = 2
+            while f"{name} {k}" in seen:
+                k += 1
+            name = f"{name} {k}"
+        seen.add(name)
+        names.append(name + ".pdf")
+    return names
 
 
 def split_evenly(items: list, n: int) -> list[list]:
@@ -600,6 +671,68 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
     return len(blobs), skipped
 
 
+def note_needs_plugin(needs_plugin: list[str]) -> None:
+    if needs_plugin:
+        print(f"note: ignoring {len(needs_plugin)} HEIC/HEIF file(s) such as "
+              f"{os.path.basename(needs_plugin[0])} — convert them to JPEG/PNG, or "
+              f"install pillow-heif to include them.", file=sys.stderr)
+
+
+def make_pdfs(files, out_path, parts, args, engine, *, bar_label=None):
+    """One whole --parts run: chunk the images and write the PDF file(s).
+
+    Prints the per-part result lines, the split total and the skipped-file
+    warnings. main() calls this once normally, or once per folder with
+    --recursive (bar_label then names the folder on the progress bar).
+    Returns (pages_written, bytes_written, files_skipped).
+    """
+    number_corner = args.number_corner or "bottom-right"
+    chunks = split_evenly(files, parts)
+    total_bytes = 0
+    total_pages = 0
+    all_skipped = []
+    for i, chunk in enumerate(chunks, start=1):
+        out = part_path(out_path, i, parts)
+        if bar_label:
+            bar_text = f"{bar_label} {i}/{parts}" if parts > 1 else bar_label
+        else:
+            bar_text = f"Part {i}/{parts}" if parts > 1 else "Building PDF"
+        bar = ProgressBar(len(chunk), label=bar_text)
+        pages_written, skipped = build(
+            engine, chunk, out, args.dpi, max_height=args.max_height,
+            quality=args.quality, margin=args.margin, page=args.page, bg=args.bg,
+            per_page=args.per_page, gap_cm=args.gap, progress=bar,
+            # Numbers continue across parts: the next part picks up right
+            # after the pages already written (skipped files leave no gap).
+            number_start=(1 + total_pages) if args.number_pages else 0,
+            number_corner=number_corner)
+        bar.close()
+        all_skipped.extend(skipped)
+        total_pages += pages_written
+        label = f"part {i}/{parts}: " if parts > 1 else ""
+        if pages_written == 0:
+            print(f"  {label}no readable images — nothing written")
+            continue
+        nbytes = os.path.getsize(out)
+        total_bytes += nbytes
+        first, last = os.path.basename(chunk[0]), os.path.basename(chunk[-1])
+        print(f"  {label}{pages_written} pages -> {out}  "
+              f"[{nbytes / 1024 / 1024:.1f} MB]  ({first} ... {last})")
+
+    if parts > 1:
+        print(f"total: {total_pages} pages across {parts} files, "
+              f"{total_bytes / 1024 / 1024:.1f} MB")
+
+    if all_skipped:
+        print(file=sys.stderr)
+        for path, reason in all_skipped:
+            print(f"WARNING: could not read {os.path.basename(path)} — skipped it "
+                  f"[{reason}]", file=sys.stderr)
+        print(f"WARNING: {len(all_skipped)} file(s) were skipped; the PDF was built "
+              f"from the {total_pages} that worked.", file=sys.stderr)
+    return total_pages, total_bytes, len(all_skipped)
+
+
 def resolve_engine(name: str) -> str:
     if name != "auto":
         return name
@@ -618,8 +751,14 @@ def main() -> None:
     )
     ap.add_argument("--src", default=os.path.join(here, "pictures"),
                     help='source image directory (default: "pictures")')
-    ap.add_argument("--out", default=os.path.join(here, "pictures.pdf"),
-                    help="output PDF path; for --parts>1 a _partX_of_N suffix is added")
+    ap.add_argument("--out", default=None,
+                    help="output PDF path (default: pictures.pdf next to this "
+                         "script); for --parts>1 a _partX_of_N suffix is added; "
+                         "with --recursive this is the output FOLDER")
+    ap.add_argument("--recursive", action="store_true",
+                    help="one PDF per folder, named after it: this folder and "
+                         "every folder inside it that directly holds pictures "
+                         "(default output folder: '<src> PDFs' next to the source)")
     ap.add_argument("--parts", "-n", type=int, default=1, metavar="N",
                     help="split the images evenly into N separate PDFs (default: 1)")
     ap.add_argument("--dpi", type=float, default=150.0,
@@ -655,21 +794,9 @@ def main() -> None:
     args = ap.parse_args()
     if args.number_corner and not args.number_pages:
         args.number_pages = True
-    number_corner = args.number_corner or "bottom-right"
 
-    files, needs_plugin = collect_images(args.src)
-    if needs_plugin:
-        print(f"note: ignoring {len(needs_plugin)} HEIC/HEIF file(s) such as "
-              f"{os.path.basename(needs_plugin[0])} — convert them to JPEG/PNG, or "
-              f"install pillow-heif to include them.", file=sys.stderr)
-    if not files:
-        sys.exit(f"error: no supported images found in {args.src!r} "
-                 f"(looked for: {', '.join(e[1:] for e in IMAGE_EXTS)})")
     if args.parts < 1:
         sys.exit(f"error: --parts must be >= 1 (got {args.parts})")
-    if args.parts > len(files):
-        sys.exit(f"error: --parts ({args.parts}) exceeds image count ({len(files)}); "
-                 f"cannot make more parts than images")
     if args.quality and not (1 <= args.quality <= 95):
         sys.exit(f"error: --quality must be 1-95 (got {args.quality})")
     if args.max_height < 0:
@@ -685,8 +812,6 @@ def main() -> None:
               "border and spacing.", file=sys.stderr)
 
     engine = resolve_engine(args.engine)
-    chunks = split_evenly(files, args.parts)
-    sizes = [len(c) for c in chunks]
 
     notes = []
     if args.per_page > 1:
@@ -700,56 +825,68 @@ def main() -> None:
     if args.page != "match":
         notes.append(f"page {args.page}")
     if args.number_pages:
-        notes.append(f"page numbers (0001...) {number_corner}")
+        notes.append(f"page numbers (0001...) {args.number_corner or 'bottom-right'}")
     if notes:
         print("options:", ", ".join(notes))
+
+    if args.recursive:
+        src_abs = os.path.abspath(args.src)
+        if not os.path.isdir(src_abs):
+            sys.exit(f"error: source directory not found: {args.src!r}")
+        out_dir = args.out or (src_abs + " PDFs")
+        folders = find_image_folders(src_abs, exclude_dir=out_dir)
+        if not folders:
+            sys.exit(f"error: no folders with supported images under {args.src!r} "
+                     f"(looked for: {', '.join(e[1:] for e in IMAGE_EXTS)})")
+        n = len(folders)
+        print(f"found {n} folder{'s' if n != 1 else ''} with pictures under {src_abs}")
+        print(f"writing one PDF per folder ({engine}, {args.dpi:g} dpi) into {out_dir}")
+        os.makedirs(out_dir, exist_ok=True)
+        names = pdf_names_for(folders, src_abs)
+        made = 0
+        grand_pages = 0
+        grand_bytes = 0
+        for i, ((folder, _), name) in enumerate(zip(folders, names), start=1):
+            files, needs_plugin = collect_images(folder)
+            note_needs_plugin(needs_plugin)
+            stem = name[:-len(".pdf")]
+            print(f"[{i}/{n}] {stem}")
+            parts = min(args.parts, len(files))
+            if parts < args.parts:
+                print(f"  note: only {len(files)} picture(s) here — writing "
+                      f"{parts} file{'s' if parts != 1 else ''} instead of "
+                      f"{args.parts}.", file=sys.stderr)
+            pages, nbytes, _ = make_pdfs(files, os.path.join(out_dir, name),
+                                         parts, args, engine, bar_label=stem)
+            grand_pages += pages
+            grand_bytes += nbytes
+            if pages:
+                made += 1
+        print(f"batch total: {made} of {n} folder{'s' if n != 1 else ''} -> "
+              f"{grand_pages} pages, {grand_bytes / 1024 / 1024:.1f} MB in {out_dir}")
+        if grand_pages == 0:
+            sys.exit("error: no images could be read — no PDF was produced.")
+        return
+
+    if args.out is None:
+        args.out = os.path.join(here, "pictures.pdf")
+    files, needs_plugin = collect_images(args.src)
+    note_needs_plugin(needs_plugin)
+    if not files:
+        sys.exit(f"error: no supported images found in {args.src!r} "
+                 f"(looked for: {', '.join(e[1:] for e in IMAGE_EXTS)})")
+    if args.parts > len(files):
+        sys.exit(f"error: --parts ({args.parts}) exceeds image count ({len(files)}); "
+                 f"cannot make more parts than images")
 
     if args.parts == 1:
         print(f"building 1 PDF ({engine}, {args.dpi:g} dpi) from {len(files)} images")
     else:
+        sizes = [len(c) for c in split_evenly(files, args.parts)]
         print(f"splitting {len(files)} images into {args.parts} parts "
               f"({engine}, {args.dpi:g} dpi): sizes {sizes}")
 
-    total_bytes = 0
-    total_pages = 0
-    all_skipped = []
-    for i, chunk in enumerate(chunks, start=1):
-        out = part_path(args.out, i, args.parts)
-        bar_label = f"Part {i}/{args.parts}" if args.parts > 1 else "Building PDF"
-        bar = ProgressBar(len(chunk), label=bar_label)
-        pages_written, skipped = build(
-            engine, chunk, out, args.dpi, max_height=args.max_height,
-            quality=args.quality, margin=args.margin, page=args.page, bg=args.bg,
-            per_page=args.per_page, gap_cm=args.gap, progress=bar,
-            # Numbers continue across parts: the next part picks up right
-            # after the pages already written (skipped files leave no gap).
-            number_start=(1 + total_pages) if args.number_pages else 0,
-            number_corner=number_corner)
-        bar.close()
-        all_skipped.extend(skipped)
-        total_pages += pages_written
-        label = f"part {i}/{args.parts}: " if args.parts > 1 else ""
-        if pages_written == 0:
-            print(f"  {label}no readable images — nothing written")
-            continue
-        nbytes = os.path.getsize(out)
-        total_bytes += nbytes
-        first, last = os.path.basename(chunk[0]), os.path.basename(chunk[-1])
-        print(f"  {label}{pages_written} pages -> {out}  "
-              f"[{nbytes / 1024 / 1024:.1f} MB]  ({first} ... {last})")
-
-    if args.parts > 1:
-        print(f"total: {total_pages} pages across {args.parts} files, "
-              f"{total_bytes / 1024 / 1024:.1f} MB")
-
-    if all_skipped:
-        print(file=sys.stderr)
-        for path, reason in all_skipped:
-            print(f"WARNING: could not read {os.path.basename(path)} — skipped it "
-                  f"[{reason}]", file=sys.stderr)
-        print(f"WARNING: {len(all_skipped)} file(s) were skipped; the PDF was built "
-              f"from the {total_pages} that worked.", file=sys.stderr)
-
+    total_pages, _, _ = make_pdfs(files, args.out, args.parts, args, engine)
     if total_pages == 0:
         sys.exit("error: no images could be read — no PDF was produced.")
 
