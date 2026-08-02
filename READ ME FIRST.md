@@ -45,8 +45,12 @@ PDF Maker needs **Python**, a free program. Install it once:
 4. It asks a few quick questions — **pictures per page** (one, or three to a
    landscape page), **note margins** / **spacing**, **file size**, **page
    numbers**, and **how many PDF files** (all explained below). Press
-   <kbd>Return</kbd> for the normal choice each time.
+   <kbd>Return</kbd> for the normal choice each time. (If your folder is
+   really a *collection of folders*, there's one extra question first —
+   see *A whole folder of folders* below.)
 5. Your PDF pops up next to the folder (e.g. `pictures.pdf`).
+6. It then asks **"Do another folder? (y/n)"** — answer `y` to drag the next
+   folder in and keep going, or press <kbd>Return</kbd> to finish.
 
 > 🔒 **The very first time you open it** (especially after downloading the zip),
 > your computer may warn you. This is normal for anything not from an app store —
@@ -164,6 +168,41 @@ When it asks *"Do you want a page number stamped on every page?"*, pick:
 If you also split into several PDFs, the numbers **keep counting across the files** —
 part 2 carries on where part 1 stopped. In the Terminal (see §7) this is
 `--number-pages`, plus `--number-corner top-left` (etc.) to pick a different corner.
+
+## A whole folder of folders 🗂️
+
+Got a big folder that's really a *collection* of folders — one per month, per
+chapter, per client? PDF Maker can turn **every folder into its own PDF**, each
+named after its folder, in one go.
+
+When the folder you pick has more folders with pictures inside it, PDF Maker
+asks one extra question first:
+
+| Your choice | What you get |
+| --- | --- |
+| **One PDF per folder** | Every folder that holds pictures becomes its own PDF (`beach` → `beach.pdf`), folders-inside-folders included. They're all saved together in a new folder named after the one you picked, e.g. `holidays PDFs`. |
+| **Just this folder** | The classic single PDF, from the pictures sitting directly in the folder you picked. |
+
+Pressing <kbd>Return</kbd> picks whichever makes sense: if the folder you
+picked holds no pictures itself (it's purely an organiser), one-PDF-per-folder
+is the suggestion; otherwise the classic single PDF is.
+
+Worth knowing:
+
+- Every other answer (margins, file size, page numbers, splitting) applies to
+  **each** folder's PDF. Page numbers restart at 0001 in every PDF.
+- Two folders sharing a name both work — the twin gets its path in the name,
+  e.g. `photos.pdf` and `2023 - photos.pdf`.
+- Hidden folders and zip leftovers (like `__MACOSX`) are ignored, and a folder
+  whose pictures can't be read never stops the rest.
+- In the Terminal (see §7) this is `--recursive`.
+
+## Doing several folders in one sitting 🔁
+
+Whenever a PDF (or a whole batch) is finished, PDF Maker asks
+**"Do another folder? (y/n)"**. Answer `y`, drag the next folder in, and keep
+going — no more reopening the app (and re-approving the security pop-up) for
+every folder. Press <kbd>Return</kbd> when you're done.
 
 ## 6 · Which picture types work 🖼️
 

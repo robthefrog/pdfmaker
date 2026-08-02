@@ -198,6 +198,61 @@ def choose_folder(argv_folder: str | None, what: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Spotting a "folder of folders" (for the one-PDF-per-folder offer)
+# ---------------------------------------------------------------------------
+# Mirrors generate_pdf.py: same extensions (HEIC needs a plugin, so it doesn't
+# count), same skip rules for hidden files/folders and zip artefacts.
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff")
+SKIP_DIR_NAMES = {"__MACOSX", "__pycache__"}
+
+
+def folder_holds_pictures(folder: str) -> bool:
+    try:
+        entries = os.listdir(folder)
+    except OSError:
+        return False
+    return any(not e.startswith(".") and e.lower().endswith(IMAGE_EXTS)
+               and os.path.isfile(os.path.join(folder, e)) for e in entries)
+
+
+def subfolders_hold_pictures(folder: str) -> bool:
+    for dirpath, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d not in SKIP_DIR_NAMES]
+        if dirpath != folder and any(
+                not f.startswith(".") and f.lower().endswith(IMAGE_EXTS)
+                for f in filenames):
+            return True
+    return False
+
+
+def ask_per_folder(folder: str) -> bool:
+    """Offer one-PDF-per-folder when the chosen folder is a folder of folders.
+
+    Silent (False) when there are no picture subfolders. The default answer
+    follows the pictures: folders that also hold their own pictures default
+    to the classic single PDF; folders that are ONLY organisers default to
+    one PDF per folder, because a single PDF would come out empty.
+    """
+    if not subfolders_hold_pictures(folder):
+        return False
+    print("This folder has more folders inside it that contain pictures.")
+    print("Do you want one PDF for every folder, each named after its folder?")
+    if folder_holds_pictures(folder):
+        print("   1) No  - one PDF, just from the pictures directly in this folder   (default)")
+        print("   2) Yes - one PDF per folder, saved together in one new folder")
+        answer = ask("Choose 1 or 2 [1]: ").strip()
+        print()
+        return answer == "2"
+    print("(There are no pictures directly inside it - only in the folders within.)")
+    print("   1) Yes - one PDF per folder, saved together in one new folder   (default)")
+    print("   2) No  - just this folder's own pictures (it has none, so this stops)")
+    answer = ask("Choose 1 or 2 [1]: ").strip()
+    print()
+    return answer != "2"
+
+
+# ---------------------------------------------------------------------------
 # Revealing the result
 # ---------------------------------------------------------------------------
 def reveal_file(path: str) -> None:
@@ -238,8 +293,11 @@ def run_engine(script: str, engine_args: list[str]) -> bool:
 def make_flow(argv_folder: str | None) -> None:
     banner("PDF Maker")
     folder = choose_folder(argv_folder, "pictures should I turn into a PDF")
+    per_folder = ask_per_folder(folder)
 
     opts: list[str] = []
+    if per_folder:
+        opts += ["--recursive"]
     print("How many pictures per page?")
     print("   1) One   - one picture per page, filling it        (default)")
     print("   3) Three - three side-by-side on a landscape page  (great for phone screenshots)")
@@ -314,13 +372,20 @@ def make_flow(argv_folder: str | None) -> None:
         parts = 4
     print()
 
-    out = folder + ".pdf"
-    print("Making your PDF from the pictures in:")
+    out = folder + (" PDFs" if per_folder else ".pdf")
+    if per_folder:
+        print("Making one PDF for every folder of pictures inside:")
+    else:
+        print("Making your PDF from the pictures in:")
     print("   " + folder)
     print()
     if run_engine("generate_pdf.py", ["--src", folder, "--out", out] + opts):
         print()
-        if parts > 1:
+        if per_folder:
+            print("Done!  Your PDFs are saved together here:")
+            print("   " + out)
+            open_folder(out)
+        elif parts > 1:
             print("Done!  Your %d PDF files are saved next to the pictures folder" % parts)
             print("(their names end in _partX_of_%d.pdf - see the list just above)." % parts)
             open_folder(os.path.dirname(out) or ".")

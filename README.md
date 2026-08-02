@@ -1,15 +1,17 @@
 # PDF Maker
 
 Turn a folder of pictures into a PDF — one picture per page (or three
-side-by-side on a landscape page), in order. Also combines a folder of PDFs
-into a single file. Works on macOS and Windows: non-technical users just
-double-click a launcher; everything is also available from the command line.
+side-by-side on a landscape page), in order. Point it at a folder of folders
+and it makes one PDF per folder, each named after its folder. Also combines a
+folder of PDFs into a single file. Works on macOS and Windows: non-technical
+users just double-click a launcher; everything is also available from the
+command line.
 
 ## What's in the box
 
 | Item | What it is |
 | --- | --- |
-| **Make PDF.command** / **Make PDF.bat** | Double-click launchers (macOS / Windows): pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, page numbers, splitting). On Windows you can also drag a folder onto the icon. |
+| **Make PDF.command** / **Make PDF.bat** | Double-click launchers (macOS / Windows): pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, page numbers, splitting; folders-of-folders get a one-PDF-per-folder offer), then offers to do another folder. On Windows you can also drag a folder onto the icon. |
 | **Combine PDFs.command** / **Combine PDFs.bat** | Double-click launchers (macOS / Windows): merges every PDF in a folder into one, in order. |
 | `launcher.py` | The shared interactive flow behind all four launchers — first-run setup, the questions, and revealing the finished PDF. |
 | `generate_pdf.py` | The picture-to-PDF engine (Pillow + img2pdf). |
@@ -89,6 +91,9 @@ python3 generate_pdf.py --src "path/to/pictures" --parts 3
 python3 generate_pdf.py --src "path/to/pictures" --number-pages
 python3 generate_pdf.py --src "path/to/pictures" --number-corner top-left
 
+# A directory of folders: one PDF per folder, named after it, into "scans PDFs":
+python3 generate_pdf.py --src "path/to/scans" --recursive
+
 # Merge a folder of PDFs, ordered by the number in each filename:
 python3 combine_pdfs.py --src "path/to/pdfs"
 ```
@@ -105,6 +110,12 @@ Run either script with `--help` for every option.
   `pillow-heif` is installed.
 - Optional page numbers (0001, 0002, …) are burned into the pages themselves in a
   neutral grey, in any corner, and keep counting across `--parts` files.
+- `--recursive` makes one PDF per folder that holds pictures (nested folders
+  included). Same-named folders are told apart by their path
+  (`2023 - photos.pdf`); every other option applies to each folder's PDF, with
+  page numbers restarting at 0001; one unreadable folder never stops the rest.
+- Hidden files and folders (`.DS_Store`, `._*` AppleDouble forks) and zip
+  leftovers like `__MACOSX` are ignored outright — no warnings, no blank pages.
 
 ## License
 
