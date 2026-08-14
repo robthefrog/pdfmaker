@@ -166,7 +166,7 @@ When it asks *"Do you want a page number stamped on every page?"*, pick:
 | **3–5) Yes — other corners** | Bottom left, top right, or top left instead. |
 
 If you say yes to numbers, PDF Maker asks one more thing: whether to put the
-**folder's name in front** of each number — pages then read `beach 0042`
+**folder's name in front** of each number — pages then read `beach - 0042`
 instead of `0042`. This shines with *A whole folder of folders* above: every
 printed page says exactly which folder it came from, and the count restarts
 at 0001 for each folder's PDF.
@@ -198,7 +198,7 @@ Worth knowing:
 
 - Every other answer (margins, file size, page numbers, splitting) applies to
   **each** folder's PDF. Page numbers restart at 0001 in every PDF — and can
-  carry the folder's name (`beach 0001`) if you say yes to the name question.
+  carry the folder's name (`beach - 0001`) if you say yes to the name question.
 - Two folders sharing a name both work — the twin gets its path in the name,
   e.g. `photos.pdf` and `2023 - photos.pdf`.
 - Hidden folders and zip leftovers (like `__MACOSX`) are ignored, and a folder

@@ -94,7 +94,7 @@ python3 generate_pdf.py --src "path/to/pictures" --number-corner top-left
 # A directory of folders: one PDF per folder, named after it, into "scans PDFs":
 python3 generate_pdf.py --src "path/to/scans" --recursive
 
-# Same, with each page stamped "beach 0001", "beach 0002", ... per folder:
+# Same, with each page stamped "beach - 0001", "beach - 0002", ... per folder:
 python3 generate_pdf.py --src "path/to/scans" --recursive --number-folder
 
 # Merge a folder of PDFs, ordered by the number in each filename:
@@ -113,7 +113,7 @@ Run either script with `--help` for every option.
   `pillow-heif` is installed.
 - Optional page numbers (0001, 0002, …) are burned into the pages themselves in a
   neutral grey, in any corner, and keep counting across `--parts` files.
-  `--number-folder` puts the folder's name in front (`beach 0001`); with
+  `--number-folder` puts the folder's name in front (`beach - 0001`); with
   `--recursive` each PDF stamps its own (disambiguated) name and the count
   restarts at 0001 per folder.
 - `--recursive` makes one PDF per folder that holds pictures (nested folders

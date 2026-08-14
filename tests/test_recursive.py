@@ -214,6 +214,13 @@ def first_page_image(pdf_path):
 
 def t_number_folder_prefix():
     print("N1: --number-folder puts the folder's name before the number")
+    sys.path.insert(0, REPO)
+    import generate_pdf as g
+    text_of = getattr(g, "number_stamp_text", lambda *a: None)
+    check("stamp text is 'name - 0007' (dash-separated)",
+          text_of(7, "beach") == "beach - 0007", repr(text_of(7, "beach")))
+    check("no dash without a name", text_of(7, "") == "0007",
+          repr(text_of(7, "")))
     out = os.path.join(RT, "beta_named.pdf")
     r = run_engine(["--src", os.path.join(RT, "tree", "beta"), "--out", out,
                     "--number-folder"])

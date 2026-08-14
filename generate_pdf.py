@@ -43,7 +43,7 @@ Page numbers (optional)
     top-right, top-left) and implies --number-pages. Numbers continue across
     --parts files. Stamped JPEGs are re-encoded at quality 90.
     --number-folder puts the folder's name in front of each number
-    ("beach 0001") — with --recursive every folder stamps its own name
+    ("beach - 0001") — with --recursive every folder stamps its own name
     (matching its PDF's name) and the count restarts at 0001 per folder.
     Also implies --number-pages.
 
@@ -255,6 +255,12 @@ def describe_error(exc: Exception) -> str:
 NUMBER_CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
 
 
+def number_stamp_text(number: int, prefix: str = "") -> str:
+    """The literal stamp text: "0007" alone, "beach - 0007" with a prefix."""
+    text = str(number).zfill(4)
+    return f"{prefix} - {text}" if prefix else text
+
+
 def stamp_page_number(im, number: int, corner: str, prefix: str = ""):
     """Burn a zero-padded page number ("0001") into one corner of a page.
 
@@ -262,12 +268,10 @@ def stamp_page_number(im, number: int, corner: str, prefix: str = ""):
     prints exactly as shown. Neutral mid-grey with a thin white outline keeps
     it readable over both dark photos and white paper. The text height scales
     with the page so it stays proportional at any raster size. A non-empty
-    prefix (the folder's name) goes in front: "beach 0001".
+    prefix (the folder's name) goes in front: "beach - 0001".
     """
     from PIL import ImageDraw, ImageFont
-    text = str(number).zfill(4)
-    if prefix:
-        text = f"{prefix} {text}"
+    text = number_stamp_text(number, prefix)
     size = max(12, round(min(im.size) * 0.03))
     try:
         font = ImageFont.load_default(size=size)
@@ -636,7 +640,7 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
 
     number_start > 0 burns page numbers onto the pages, starting at that
     value (0001-style), into number_corner; 0 leaves pages untouched.
-    A non-empty number_prefix goes in front of each number ("beach 0001").
+    A non-empty number_prefix goes in front of each number ("beach - 0001").
     """
     if per_page > 1:
         # The N-per-page landscape layout is always a composed raster, so it
@@ -817,7 +821,7 @@ def main() -> None:
                          "bottom-left, top-right or top-left; implies --number-pages")
     ap.add_argument("--number-folder", action="store_true",
                     help="put the folder's name in front of each page number "
-                         "('beach 0001'); with --recursive each folder stamps "
+                         "('beach - 0001'); with --recursive each folder stamps "
                          "its own name; implies --number-pages")
     ap.add_argument("--engine", choices=["auto", "img2pdf", "pillow"], default="auto",
                     help="PDF engine for the plain lossless case (default: auto)")
