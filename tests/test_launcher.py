@@ -183,12 +183,58 @@ def t4_adaptive_default():
           "no pictures directly" in r.stdout.lower(), r.stdout[-600:])
 
 
+# ---------------------------------------------------------------------------
+# T5 - choosing page numbers offers a folder-name prefix ("flatA 0001")
+# ---------------------------------------------------------------------------
+def t5_number_folder_name():
+    print("T5: folder-name prefix on page numbers")
+    sys.path.insert(0, REPO)
+    from PIL import Image
+    from pypdf import PdfReader
+    import generate_pdf as g
+
+    def first_page(pdf):
+        imgs = PdfReader(pdf).pages[0].images
+        return imgs[0].image.convert("RGB") if imgs else None
+
+    def ref(prefix):
+        im = Image.new("RGB", (60, 80), "red")  # pic_1.png of flatA
+        g.stamp_page_number(im, 1, "bottom-right", prefix)
+        return im
+
+    flat = os.path.join(LT, "flatA")
+    out = flat + ".pdf"
+    # numbers: 2 (bottom right), then YES to the name prefix
+    r = run_launcher(["make", flat], "\n\n\n2\ny\n\n")
+    check("exits 0", r.returncode == 0, (r.stdout + r.stderr)[-400:])
+    check("prefix question offered", "name in front of each number" in r.stdout,
+          r.stdout[-600:])
+    got = first_page(out)
+    want = ref("flatA")
+    check("page stamped 'flatA 0001' (pixel-exact)",
+          got is not None and got.size == want.size
+          and got.tobytes() == want.tobytes())
+
+    # Plain Return at the prefix question keeps the bare 0001.
+    r = run_launcher(["make", flat], "\n\n\n2\n\n\n")
+    got = first_page(out)
+    want = ref("")
+    check("default keeps the bare number", r.returncode == 0
+          and got is not None and got.tobytes() == want.tobytes())
+
+    # No page numbers at all -> the prefix question never appears.
+    r = run_launcher(["make", flat], "\n" * 6)
+    check("question skipped when numbering is off",
+          "name in front of each number" not in r.stdout)
+
+
 def main():
     setup()
     t1_frog()
     t2_do_another()
     t3_recursion_question()
     t4_adaptive_default()
+    t5_number_folder_name()
     print()
     print(f"{PASS} passed, {FAIL} failed")
     if FAIL:

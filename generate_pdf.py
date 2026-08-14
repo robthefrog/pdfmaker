@@ -42,6 +42,10 @@ Page numbers (optional)
     --number-corner picks the corner (bottom-right by default; also bottom-left,
     top-right, top-left) and implies --number-pages. Numbers continue across
     --parts files. Stamped JPEGs are re-encoded at quality 90.
+    --number-folder puts the folder's name in front of each number
+    ("beach 0001") — with --recursive every folder stamps its own name
+    (matching its PDF's name) and the count restarts at 0001 per folder.
+    Also implies --number-pages.
 
 A whole directory of folders (batch)
     --recursive walks the source folder and writes one PDF per folder that
@@ -251,16 +255,19 @@ def describe_error(exc: Exception) -> str:
 NUMBER_CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
 
 
-def stamp_page_number(im, number: int, corner: str):
+def stamp_page_number(im, number: int, corner: str, prefix: str = ""):
     """Burn a zero-padded page number ("0001") into one corner of a page.
 
     Drawn onto the pixels themselves, so it sits on top of the content and
     prints exactly as shown. Neutral mid-grey with a thin white outline keeps
     it readable over both dark photos and white paper. The text height scales
-    with the page so it stays proportional at any raster size.
+    with the page so it stays proportional at any raster size. A non-empty
+    prefix (the folder's name) goes in front: "beach 0001".
     """
     from PIL import ImageDraw, ImageFont
     text = str(number).zfill(4)
+    if prefix:
+        text = f"{prefix} {text}"
     size = max(12, round(min(im.size) * 0.03))
     try:
         font = ImageFont.load_default(size=size)
@@ -282,7 +289,8 @@ def stamp_page_number(im, number: int, corner: str):
 # Plain (lossless) engines — used when no space/layout flags are given.
 # ---------------------------------------------------------------------------
 def prepare_sources(files: list[str], force_reencode: bool = False, progress=None,
-                    number_start: int = 0, number_corner: str = "bottom-right"):
+                    number_start: int = 0, number_corner: str = "bottom-right",
+                    number_prefix: str = ""):
     """Turn each file into an img2pdf-ready source, skipping unreadable ones.
 
     Upright JPEG images in RGB/grayscale are passed through untouched (embedded
@@ -322,7 +330,7 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
                     rgb = im if im.mode == "RGB" else im.convert("RGB")
                     if number_start:
                         stamp_page_number(rgb, number_start + len(sources),
-                                          number_corner)
+                                          number_corner, number_prefix)
                     buf = io.BytesIO()
                     if number_start and ext in (".jpg", ".jpeg"):
                         rgb.save(buf, format="JPEG", quality=90)
@@ -335,11 +343,13 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
 
 
 def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=None,
-                       number_start: int = 0, number_corner: str = "bottom-right"):
+                       number_start: int = 0, number_corner: str = "bottom-right",
+                       number_prefix: str = ""):
     import img2pdf
     sources, skipped = prepare_sources(files, progress=progress,
                                        number_start=number_start,
-                                       number_corner=number_corner)
+                                       number_corner=number_corner,
+                                       number_prefix=number_prefix)
     if not sources:
         return 0, skipped
     if progress is not None:
@@ -356,7 +366,8 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=Non
             progress.note("re-encoding images")
         sources, skipped = prepare_sources(files, force_reencode=True,
                                            number_start=number_start,
-                                           number_corner=number_corner)
+                                           number_corner=number_corner,
+                                           number_prefix=number_prefix)
         if not sources:
             return 0, skipped
         try:
@@ -369,7 +380,8 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=Non
 
 
 def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None,
-                      number_start: int = 0, number_corner: str = "bottom-right"):
+                      number_start: int = 0, number_corner: str = "bottom-right",
+                      number_prefix: str = ""):
     from PIL import Image, ImageOps
     pages, skipped = [], []
     for p in files:
@@ -381,7 +393,8 @@ def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None
             im = ImageOps.exif_transpose(im)  # honour EXIF rotation (phone photos)
             im = im if im.mode == "RGB" else im.convert("RGB")
             if number_start:
-                stamp_page_number(im, number_start + len(pages), number_corner)
+                stamp_page_number(im, number_start + len(pages), number_corner,
+                                  number_prefix)
             pages.append(im)
         except Exception as exc:
             skipped.append((p, describe_error(exc)))
@@ -417,7 +430,7 @@ def page_inches(page_spec: str, native_px: tuple[int, int], dpi: float):
 
 
 def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, progress=None,
-                  number_start=0, number_corner="bottom-right"):
+                  number_start=0, number_corner="bottom-right", number_prefix=""):
     """Render each image onto a page canvas; return (page_blobs, raster, skipped).
 
     Unreadable files are skipped and recorded in `skipped` as (path, reason).
@@ -487,7 +500,8 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, pro
                 canvas = Image.new("RGB", (w_px, h_px), bg)
                 canvas.paste(im, (round((w_px - im.width) / 2), round((h_px - im.height) / 2)))
                 if number_start:
-                    stamp_page_number(canvas, number_start + len(blobs), number_corner)
+                    stamp_page_number(canvas, number_start + len(blobs),
+                                      number_corner, number_prefix)
                 buf = io.BytesIO()
                 if quality:
                     canvas.save(buf, "JPEG", quality=quality, optimize=True)
@@ -523,7 +537,7 @@ def multiup_page_inches(page_spec: str):
 
 
 def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, page_spec, bg, progress=None,
-                          number_start=0, number_corner="bottom-right"):
+                          number_start=0, number_corner="bottom-right", number_prefix=""):
     """Render `per_page` pictures across each landscape page (one row of cells).
 
     Pictures are placed left-to-right in file order, each scaled to fit its cell
@@ -580,7 +594,8 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
             y = state["gap_px"] + (state["cell_h"] - tile.height) // 2
             canvas.paste(tile, (x, y))
         if number_start:
-            stamp_page_number(canvas, number_start + len(blobs), number_corner)
+            stamp_page_number(canvas, number_start + len(blobs), number_corner,
+                              number_prefix)
         buf = io.BytesIO()
         if quality:
             canvas.save(buf, "JPEG", quality=quality, optimize=True)
@@ -616,11 +631,12 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
 
 def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
           margin=0.0, page="match", bg="white", per_page=1, gap_cm=0.5, progress=None,
-          number_start=0, number_corner="bottom-right"):
+          number_start=0, number_corner="bottom-right", number_prefix=""):
     """Build one PDF. Returns (pages_written, skipped).
 
     number_start > 0 burns page numbers onto the pages, starting at that
     value (0001-style), into number_corner; 0 leaves pages untouched.
+    A non-empty number_prefix goes in front of each number ("beach 0001").
     """
     if per_page > 1:
         # The N-per-page landscape layout is always a composed raster, so it
@@ -631,7 +647,8 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
             sys.exit("error: --per-page requires img2pdf (pip install img2pdf)")
         blobs, raster, skipped = compose_multiup_pages(
             files, dpi, max_height, quality, per_page, gap_cm, page, bg, progress=progress,
-            number_start=number_start, number_corner=number_corner)
+            number_start=number_start, number_corner=number_corner,
+            number_prefix=number_prefix)
         if not blobs:
             return 0, skipped
         if progress is not None:
@@ -650,17 +667,20 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
         if engine == "img2pdf":
             return build_with_img2pdf(files, out_path, dpi, progress=progress,
                                       number_start=number_start,
-                                      number_corner=number_corner)
+                                      number_corner=number_corner,
+                                      number_prefix=number_prefix)
         return build_with_pillow(files, out_path, dpi, progress=progress,
                                  number_start=number_start,
-                                 number_corner=number_corner)
+                                 number_corner=number_corner,
+                                 number_prefix=number_prefix)
     try:
         import img2pdf
     except ImportError:
         sys.exit("error: --max-height/--quality/--margin/--page require img2pdf "
                  "(pip install img2pdf)")
     blobs, raster, skipped = compose_pages(files, dpi, max_height, quality, margin, page, bg, progress=progress,
-                                           number_start=number_start, number_corner=number_corner)
+                                           number_start=number_start, number_corner=number_corner,
+                                           number_prefix=number_prefix)
     if not blobs:
         return 0, skipped
     if progress is not None:
@@ -682,12 +702,14 @@ def note_needs_plugin(needs_plugin: list[str]) -> None:
               f"install pillow-heif to include them.", file=sys.stderr)
 
 
-def make_pdfs(files, out_path, parts, args, engine, *, bar_label=None):
+def make_pdfs(files, out_path, parts, args, engine, *, bar_label=None,
+              number_prefix=""):
     """One whole --parts run: chunk the images and write the PDF file(s).
 
     Prints the per-part result lines, the split total and the skipped-file
     warnings. main() calls this once normally, or once per folder with
-    --recursive (bar_label then names the folder on the progress bar).
+    --recursive (bar_label then names the folder on the progress bar, and
+    number_prefix carries that folder's name into the page stamps).
     Returns (pages_written, bytes_written, files_skipped).
     """
     number_corner = args.number_corner or "bottom-right"
@@ -709,7 +731,7 @@ def make_pdfs(files, out_path, parts, args, engine, *, bar_label=None):
             # Numbers continue across parts: the next part picks up right
             # after the pages already written (skipped files leave no gap).
             number_start=(1 + total_pages) if args.number_pages else 0,
-            number_corner=number_corner)
+            number_corner=number_corner, number_prefix=number_prefix)
         bar.close()
         all_skipped.extend(skipped)
         total_pages += pages_written
@@ -793,10 +815,14 @@ def main() -> None:
                     metavar="CORNER",
                     help="corner for the page number: bottom-right (default), "
                          "bottom-left, top-right or top-left; implies --number-pages")
+    ap.add_argument("--number-folder", action="store_true",
+                    help="put the folder's name in front of each page number "
+                         "('beach 0001'); with --recursive each folder stamps "
+                         "its own name; implies --number-pages")
     ap.add_argument("--engine", choices=["auto", "img2pdf", "pillow"], default="auto",
                     help="PDF engine for the plain lossless case (default: auto)")
     args = ap.parse_args()
-    if args.number_corner and not args.number_pages:
+    if (args.number_corner or args.number_folder) and not args.number_pages:
         args.number_pages = True
 
     if args.parts < 1:
@@ -829,7 +855,8 @@ def main() -> None:
     if args.page != "match":
         notes.append(f"page {args.page}")
     if args.number_pages:
-        notes.append(f"page numbers (0001...) {args.number_corner or 'bottom-right'}")
+        style = "folder name + 0001..." if args.number_folder else "0001..."
+        notes.append(f"page numbers ({style}) {args.number_corner or 'bottom-right'}")
     if notes:
         print("options:", ", ".join(notes))
 
@@ -862,8 +889,12 @@ def main() -> None:
                 print(f"  note: only {len(files)} picture(s) here — writing "
                       f"{parts} file{'s' if parts != 1 else ''} instead of "
                       f"{args.parts}.", file=sys.stderr)
-            pages, nbytes, _ = make_pdfs(files, os.path.join(out_dir, name),
-                                         parts, args, engine, bar_label=stem)
+            pages, nbytes, _ = make_pdfs(
+                files, os.path.join(out_dir, name), parts, args, engine,
+                bar_label=stem,
+                # The stamp matches the PDF's name, so pages from two
+                # same-named folders stay tellable apart on paper too.
+                number_prefix=stem if args.number_folder else "")
             grand_pages += pages
             grand_bytes += nbytes
             if pages:
@@ -892,7 +923,10 @@ def main() -> None:
         print(f"splitting {len(files)} images into {args.parts} parts "
               f"({engine}, {args.dpi:g} dpi): sizes {sizes}")
 
-    total_pages, _, _ = make_pdfs(files, args.out, args.parts, args, engine)
+    prefix = (os.path.basename(os.path.abspath(args.src))
+              if args.number_folder else "")
+    total_pages, _, _ = make_pdfs(files, args.out, args.parts, args, engine,
+                                  number_prefix=prefix)
     if total_pages == 0:
         sys.exit("error: no images could be read — no PDF was produced.")
 

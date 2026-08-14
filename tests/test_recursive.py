@@ -196,6 +196,55 @@ def t_options_thread_through():
         check("each folder's numbering restarts at 0001", same)
 
 
+def stamp_reference(color, number, prefix):
+    """A freshly stamped copy of a fixture picture, via the engine's own code."""
+    sys.path.insert(0, REPO)
+    from PIL import Image
+    import generate_pdf as g
+    ref = Image.new("RGB", (60, 80), color)
+    g.stamp_page_number(ref, number, "bottom-right", prefix)
+    return ref
+
+
+def first_page_image(pdf_path):
+    from pypdf import PdfReader
+    imgs = PdfReader(pdf_path).pages[0].images
+    return imgs[0].image.convert("RGB") if imgs else None
+
+
+def t_number_folder_prefix():
+    print("N1: --number-folder puts the folder's name before the number")
+    out = os.path.join(RT, "beta_named.pdf")
+    r = run_engine(["--src", os.path.join(RT, "tree", "beta"), "--out", out,
+                    "--number-folder"])
+    check("exits 0 (and implies --number-pages)", r.returncode == 0,
+          (r.stdout + r.stderr)[-300:])
+    check("notes line mentions the folder name",
+          "folder name" in r.stdout, r.stdout[:300])
+    if r.returncode == 0:
+        got = first_page_image(out)
+        ref = stamp_reference("black", 1, "beta")
+        check("page stamped 'beta 0001' (pixel-exact)",
+              got is not None and got.size == ref.size
+              and got.tobytes() == ref.tobytes())
+
+    print("N2: recursive stamps match each PDF's (disambiguated) name")
+    outdir = os.path.join(RT, "clash_named")
+    r = run_engine(["--recursive", "--src", os.path.join(RT, "clash"),
+                    "--out", outdir, "--number-folder"])
+    check("exits 0", r.returncode == 0, (r.stdout + r.stderr)[-300:])
+    if r.returncode == 0:
+        for pdf, color in (("photos.pdf", "red"), ("2023 - photos.pdf", "blue")):
+            path = os.path.join(outdir, pdf)
+            ok = False
+            if os.path.isfile(path):
+                got = first_page_image(path)
+                ref = stamp_reference(color, 1, pdf[:-len(".pdf")])
+                ok = (got is not None and got.size == ref.size
+                      and got.tobytes() == ref.tobytes())
+            check(f"'{pdf}' stamped with its own name, restarting at 0001", ok)
+
+
 def t_bad_folder_resilience():
     print("R5: one unreadable folder never sinks the batch")
     outdir = os.path.join(RT, "badmix PDFs")
@@ -268,6 +317,7 @@ def main():
     t_recursive_custom_outdir()
     t_name_clash()
     t_options_thread_through()
+    t_number_folder_prefix()
     t_bad_folder_resilience()
     t_junk_files_ignored()
     t_junk_only_folder_recursive()

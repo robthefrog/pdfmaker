@@ -355,6 +355,13 @@ def make_flow(argv_folder: str | None) -> None:
         opts += ["--number-corner", "top-right"]
     elif numbers == "5":
         opts += ["--number-corner", "top-left"]
+    if numbers in ("2", "3", "4", "5"):
+        print()
+        print("Put the folder's name in front of each number (like 'beach 0042')?")
+        print("Handy when every folder gets its own PDF.")
+        named = ask("y or n [n]: ").strip().lower()
+        if named in ("y", "yes"):
+            opts += ["--number-folder"]
     print()
 
     print("How many PDF files do you want? Splitting divides the pictures evenly")
