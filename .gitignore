@@ -12,3 +12,8 @@ __pycache__/
 
 # Generated output
 *.pdf
+
+# Real phone photos dropped in for local testing - personal (location data and
+# all), so never committed. The shareable HEIC samples are the synthetic
+# cartoons in "pictures/phone photos/".
+pictures/heic/

@@ -13,7 +13,7 @@ Works on **Mac** and **Windows**.
 | --- | --- |
 | **Make PDF** | The thing you double-click. On a Mac use **Make PDF.command**; on Windows use **Make PDF.bat** (you can also drag a folder onto its icon). |
 | **Combine PDFs** | Double-click to merge every PDF in a folder into one. Same idea: **.command** on a Mac, **.bat** on Windows. |
-| `pictures` | A folder with 3 sample pictures so you can try it right away. |
+| `pictures` | A folder of sample pictures so you can try it right away — including `phone photos`, three iPhone-style `.HEIC` pictures. |
 | `launcher.py`, `generate_pdf.py`, `combine_pdfs.py` | The engine. You don't open these. |
 | **READ ME FIRST.md** | This guide. |
 
@@ -39,7 +39,7 @@ PDF Maker needs **Python**, a free program. Install it once:
 
 ## 2 · Make a PDF
 
-1. Put your pictures in the `pictures` folder (you can delete the 3 samples).
+1. Put your pictures in the `pictures` folder (you can delete the samples).
 2. Double-click **Make PDF** (**.command** on a Mac, **.bat** on Windows).
 3. When it asks for a folder, just press <kbd>Return</kbd> (or drag a different folder in).
 4. It asks a few quick questions — **pictures per page** (one, or three to a
@@ -214,11 +214,21 @@ every folder. Press <kbd>Return</kbd> when you're done.
 
 ## 6 · Which picture types work 🖼️
 
-PDF Maker reads **JPG, JPEG, PNG, BMP, GIF, TIFF, and WEBP**. You can mix them in one folder.
+PDF Maker reads **JPG, JPEG, PNG, BMP, GIF, TIFF, WEBP — and iPhone photos
+(HEIC / HEIF)**. You can mix them in one folder.
 
-> 📱 **iPhone photos (`.HEIC`)** aren't included automatically. PDF Maker will tell you
-> if it finds any. To use them: on a Mac, open them in **Preview** → **File → Export** →
-> set Format to **JPEG** → save into your folder. On Windows, open the photo in the
+> 📱 **iPhone photos (`.HEIC`) just work**, on Mac and Windows alike. The small
+> add-on that reads them is downloaded with everything else the first time you
+> run PDF Maker. If your copy was set up before this was added, it fetches the
+> add-on the first time it meets a HEIC photo — a one-time download, so be
+> online for that one run. Photos come out the right way up, and are stored
+> inside the PDF as high-quality JPEG so the file stays a sensible size.
+> Want to see it? Try the `phone photos` folder inside `pictures`.
+>
+> If that download can't happen (no internet, or a very old computer), PDF
+> Maker tells you and leaves just those photos out. You can then convert them
+> yourself: on a Mac, open them in **Preview** → **File → Export** → set Format
+> to **JPEG** → save into your folder. On Windows, open the photo in the
 > **Photos** app → **… → Save as** → choose **JPG**. (Or on the iPhone itself:
 > **Settings → Camera → Formats → Most Compatible**, which saves new photos as JPEG.)
 
@@ -274,7 +284,7 @@ python3 "…/generate_pdf.py" --help
 | "Python 3 isn't installed" | Do the one-time setup in §1 (python.org). |
 | Window flashes open and closes (Windows) | Python probably isn't installed, or wasn't added to PATH — redo §1 and make sure **"Add python.exe to PATH"** is ticked. |
 | "no supported images found" | Make sure the folder has `.jpg`/`.png` (etc.) pictures. |
-| iPhone `.HEIC` photos skipped | Convert to JPEG (see §6). |
+| iPhone `.HEIC` photos skipped | Connect to the internet and run **Make PDF** again — it downloads HEIC support once. Still skipped? Convert them to JPEG (see §6). |
 | One picture is missing from the PDF | Check the window for a **WARNING** line — it names the file it couldn't read. |
 
 ## Removing it

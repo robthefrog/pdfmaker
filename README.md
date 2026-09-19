@@ -16,7 +16,7 @@ command line.
 | `launcher.py` | The shared interactive flow behind all four launchers — first-run setup, the questions, and revealing the finished PDF. |
 | `generate_pdf.py` | The picture-to-PDF engine (Pillow + img2pdf). |
 | `combine_pdfs.py` | The PDF-merging engine (pypdf). |
-| `pictures/` | Three sample images so you can try it immediately. |
+| `pictures/` | Sample images so you can try it immediately: three screenshots, a nested cartoon tree for one-PDF-per-folder, and `phone photos/` — three synthetic iPhone-style `.HEIC` files (plain, rotated, and Apple-tiled). |
 | [**READ ME FIRST.md**](<READ ME FIRST.md>) | A friendly step-by-step guide for non-technical users. |
 
 ## See it in action
@@ -67,13 +67,14 @@ and run it. **On the first screen tick "Add python.exe to PATH"**, then click
    Gatekeeper; on Windows click "More info" → "Run anyway" if SmartScreen asks.
 
 The PDF is saved next to your pictures folder. See
-[**READ ME FIRST.md**](<READ ME FIRST.md>) for the full guide, including HEIC
-conversion tips and troubleshooting.
+[**READ ME FIRST.md**](<READ ME FIRST.md>) for the full guide, including
+iPhone (HEIC) photos and troubleshooting.
 
 ## Command line
 
 ```bash
 pip install img2pdf Pillow pypdf   # or let the launchers make their own .venv
+pip install pillow-heif            # optional: read iPhone HEIC/HEIF photos
 
 # One picture per page, lossless:
 python3 generate_pdf.py --src "path/to/pictures" --out out.pdf
@@ -109,8 +110,16 @@ Run either script with `--help` for every option.
   `part_10`, no zero-padding needed); files without numbers sort alphabetically after.
 - Unreadable or corrupt files are skipped with a WARNING naming the exact file —
   the PDF is still built from the rest.
-- Supported picture types: JPG, PNG, BMP, GIF, TIFF, WEBP — and HEIC/HEIF if
-  `pillow-heif` is installed.
+- Supported picture types: JPG, PNG, BMP, GIF, TIFF, WEBP — and iPhone
+  HEIC/HEIF through [`pillow-heif`](https://pypi.org/project/pillow-heif/)
+  (prebuilt wheels for Windows x64/ARM64 and Intel/Apple-silicon Macs, so
+  nothing is compiled). The launchers install it at first run, or on the spot
+  when a folder turns out to hold HEIC files and an older `.venv` lacks it. If
+  it can't be installed, HEIC files are reported and left out — never an error.
+- HEIC pages are embedded as quality-90 JPEG with their colour profile (iPhones
+  tag Display P3) rather than lossless PNG: a PDF can't hold HEVC data, and as
+  a PNG one 12-megapixel photo costs 20+ MB. Rotation stored the iPhone way
+  (`irot` box + EXIF) comes out upright.
 - Optional page numbers (0001, 0002, …) are burned into the pages themselves in a
   neutral grey, in any corner, and keep counting across `--parts` files.
   `--number-folder` puts the folder's name in front (`beach - 0001`); with
@@ -129,10 +138,12 @@ Run either script with `--help` for every option.
 python3 tests/run_all.py
 ```
 
-Runs the whole suite: the engine's folder-batch mode and the interactive
-launchers, driven end-to-end with scripted answers. The tests borrow the
-project's own `.venv` (run a launcher once first) and build all fixtures in a
-temporary folder — nothing in the repo is touched.
+Runs the whole suite: the engine's folder-batch mode, the interactive
+launchers driven end-to-end with scripted answers, and HEIC support (synthetic
+HEIC pictures written at test time; a machine without the HEIC plugin and the
+launcher's download step are both simulated, so no network is used). The tests
+borrow the project's own `.venv` (run a launcher once first) and build all
+fixtures in a temporary folder — nothing in the repo is touched.
 
 ## License
 

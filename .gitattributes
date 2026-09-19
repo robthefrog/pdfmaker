@@ -6,3 +6,6 @@
 *.md text eol=lf
 *.bat text eol=crlf
 *.png binary
+*.heic binary
+*.HEIC binary
+*.heif binary

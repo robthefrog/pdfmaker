@@ -5,8 +5,9 @@ Reads image files from a source directory (default: "pictures"), sorts
 them by the number embedded in each filename (so sample_1 ... sample_100 land
 in ascending order regardless of zero-padding), and writes one image per page.
 
-Supported picture types: JPG/JPEG, PNG, BMP, GIF, TIFF, WEBP (and HEIC/HEIF if
-the optional pillow-heif package is installed). Extend IMAGE_EXTS to add more.
+Supported picture types: JPG/JPEG, PNG, BMP, GIF, TIFF, WEBP — and HEIC/HEIF
+(iPhone photos) through the pillow-heif package, which the launchers install
+automatically. Extend IMAGE_EXTS to add more.
 
 If a file can't be read (corrupt, wrong contents, unsupported), it is skipped
 with a clear WARNING naming that exact file, and the PDF is still built from the
@@ -106,17 +107,19 @@ except Exception:
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff")
 PAGE_PRESETS = {"letter": (8.5, 11.0), "a4": (8.2677, 11.6929)}  # inches (w, h)
+HEIC_EXTS = (".heic", ".heif")  # iPhone photos
 # Known picture types we can't handle without an extra package — worth naming
 # explicitly so the user isn't left wondering why they were ignored.
-NEEDS_PLUGIN_EXTS = (".heic", ".heif")
+NEEDS_PLUGIN_EXTS = HEIC_EXTS
 
-# Optional: also accept HEIC/HEIF (e.g. iPhone photos) when the pillow-heif
-# package happens to be installed. No hard dependency — this is silently
-# skipped if it's missing, so .heic files are reported rather than erroring.
+# HEIC/HEIF are read through the pillow-heif package, which the launchers
+# install (from a prebuilt wheel) at first run, or on the spot when a folder
+# turns out to hold HEIC files. No hard dependency — where it's missing or
+# won't load, .heic files are reported and left out rather than erroring.
 try:
     import pillow_heif  # noqa: F401
     pillow_heif.register_heif_opener()
-    IMAGE_EXTS = IMAGE_EXTS + NEEDS_PLUGIN_EXTS
+    IMAGE_EXTS = IMAGE_EXTS + HEIC_EXTS
     NEEDS_PLUGIN_EXTS = ()
 except Exception:
     pass
@@ -169,6 +172,9 @@ def find_image_folders(src_dir: str, exclude_dir: str | None = None):
     (.DS_Store, "._IMG.jpg" AppleDouble forks) don't count as pictures here,
     matching collect_images, whose glob never matches hidden files — else a
     junk-only folder would be "found" and then turn out to hold nothing.
+    HEIC files count even where they can't be read (NEEDS_PLUGIN_EXTS), so a
+    folder of nothing but iPhone photos is visited and reported by name
+    instead of silently vanishing from the batch.
     """
     src_dir = os.path.abspath(src_dir)
     exclude = os.path.realpath(exclude_dir) if exclude_dir else None
@@ -179,7 +185,8 @@ def find_image_folders(src_dir: str, exclude_dir: str | None = None):
             if not d.startswith(".") and d not in SKIP_DIR_NAMES
             and (exclude is None
                  or os.path.realpath(os.path.join(dirpath, d)) != exclude))
-        if any(not f.startswith(".") and f.lower().endswith(IMAGE_EXTS)
+        if any(not f.startswith(".")
+               and f.lower().endswith(IMAGE_EXTS + NEEDS_PLUGIN_EXTS)
                for f in filenames):
             rel = os.path.relpath(dirpath, src_dir)
             parts = () if rel == "." else tuple(rel.split(os.sep))
@@ -303,6 +310,12 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
     re-encoded to PNG bytes, which img2pdf reliably accepts, so a folder mixing
     jpg/png/bmp/gif/tiff/webp all lands in the PDF the right way up.
 
+    HEIC/HEIF is the exception to "lossless": a PDF can't hold HEVC data, and
+    these are camera photos that were lossy to begin with, so they re-encode
+    as JPEG quality 90 (colour profile kept). As a PNG, a single 12-megapixel
+    phone photo costs over 20 MB — four or more times the JPEG — and a folder
+    of them would make a PDF too big to email or print.
+
     With force_reencode=True nothing is passed through: every image is decoded
     and re-encoded (used as a fallback if img2pdf rejects a passed-through file).
 
@@ -336,8 +349,14 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
                         stamp_page_number(rgb, number_start + len(sources),
                                           number_corner, number_prefix)
                     buf = io.BytesIO()
-                    if number_start and ext in (".jpg", ".jpeg"):
-                        rgb.save(buf, format="JPEG", quality=90)
+                    if ext in HEIC_EXTS or (number_start and ext in (".jpg", ".jpeg")):
+                        # Pillow's JPEG writer drops the colour profile unless
+                        # handed it (its PNG writer keeps it unasked). Phone
+                        # photos are tagged Display P3 and look washed out
+                        # if the PDF page loses that tag.
+                        icc = rgb.info.get("icc_profile")
+                        rgb.save(buf, format="JPEG", quality=90,
+                                 **({"icc_profile": icc} if icc else {}))
                     else:
                         rgb.save(buf, format="PNG")
                     sources.append(buf.getvalue())
@@ -701,9 +720,14 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
 
 def note_needs_plugin(needs_plugin: list[str]) -> None:
     if needs_plugin:
+        sys.stdout.flush()  # keep a folder heading ahead of its note when piped
         print(f"note: ignoring {len(needs_plugin)} HEIC/HEIF file(s) such as "
-              f"{os.path.basename(needs_plugin[0])} — convert them to JPEG/PNG, or "
-              f"install pillow-heif to include them.", file=sys.stderr)
+              f"{os.path.basename(needs_plugin[0])} - iPhone-photo support\n"
+              f"      (the pillow-heif package) isn't available here. The Make PDF "
+              f"launcher adds\n"
+              f"      it when you're online (or: python -m pip install pillow-heif); "
+              f"otherwise\n"
+              f"      convert them to JPEG or PNG first.", file=sys.stderr)
 
 
 def make_pdfs(files, out_path, parts, args, engine, *, bar_label=None,
@@ -883,11 +907,14 @@ def main() -> None:
         grand_bytes = 0
         for i, ((folder, _), name) in enumerate(zip(folders, names), start=1):
             files, needs_plugin = collect_images(folder)
-            note_needs_plugin(needs_plugin)
-            if not files:  # e.g. pictures deleted between the scan and now
+            if not files and not needs_plugin:  # pictures deleted since the scan
                 continue
             stem = name[:-len(".pdf")]
             print(f"[{i}/{n}] {stem}")
+            note_needs_plugin(needs_plugin)
+            if not files:  # nothing but HEIC here, and no way to read it
+                print("  no readable pictures - nothing written")
+                continue
             parts = min(args.parts, len(files))
             if parts < args.parts:
                 print(f"  note: only {len(files)} picture(s) here — writing "

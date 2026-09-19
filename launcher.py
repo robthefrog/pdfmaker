@@ -3,7 +3,8 @@
 
 The .command (macOS) and .bat (Windows) files are thin shims: they check that
 Python 3 exists and then hand over to this script, which does everything else —
-creates the private .venv on first run (installing img2pdf, Pillow and pypdf),
+creates the private .venv on first run (installing img2pdf, Pillow and pypdf,
+plus pillow-heif for iPhone HEIC photos wherever a prebuilt wheel exists),
 re-runs itself inside it, asks the plain-English questions, runs the right
 engine (generate_pdf.py or combine_pdfs.py), and reveals the finished PDF in
 Finder / File Explorer.
@@ -33,6 +34,13 @@ PIP_PACKAGES = ("img2pdf", "Pillow", "pypdf")
 # on any platform, and supports everything generate_pdf.py uses.
 PIP_NO_COMPILE = ("--only-binary", "pikepdf")
 PIP_PACKAGES_FALLBACK = ("img2pdf==0.3.6", "Pillow", "pypdf")
+# Optional extra: pillow-heif teaches Pillow to read iPhone HEIC/HEIF photos.
+# It is a compiled component as well, so the same rule applies - prebuilt
+# wheels only (they exist for Windows x64/ARM and for Intel and Apple-silicon
+# Macs) - and it must never be able to fail the setup: without it HEIC
+# pictures are simply reported and left out, exactly as before it existed.
+HEIC_PACKAGE = "pillow-heif"
+HEIC_IMPORT_CHECK = "import pillow_heif"
 INTERACTIVE = sys.stdin.isatty()
 
 
@@ -58,6 +66,30 @@ def deps_ok(python_exe: str) -> bool:
     return r.returncode == 0
 
 
+def heic_ready(python_exe: str) -> bool:
+    """True when the HEIC plugin really imports (a wheel that installed but
+    can't load on this machine counts as missing)."""
+    r = subprocess.run([python_exe, "-c", HEIC_IMPORT_CHECK],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return r.returncode == 0
+
+
+def install_heic_plugin(python_exe: str, silent: bool = False) -> bool:
+    """One wheels-only try at installing the HEIC plugin.
+
+    Short network limits keep an offline machine from hanging here. The
+    answer comes from importing the plugin afterwards, not from pip's exit
+    code, so the caller can tell the user the plain truth either way.
+    silent hides pip's own error text, for when a failure doesn't matter yet.
+    """
+    hush = subprocess.DEVNULL if silent else None
+    subprocess.run([python_exe, "-m", "pip", "install", "--quiet",
+                    "--disable-pip-version-check", "--retries", "1",
+                    "--timeout", "15", "--only-binary", ":all:", HEIC_PACKAGE],
+                   stdout=hush, stderr=hush)
+    return heic_ready(python_exe)
+
+
 def fail(message: str) -> None:
     print()
     print(message)
@@ -71,9 +103,9 @@ def ensure_environment() -> None:
         return
     vp = venv_python()
     if not (os.path.exists(vp) and deps_ok(vp)):
-        # The "setup v2" tag identifies this launcher version in screenshots
+        # The "setup v3" tag identifies this launcher version in screenshots
         # of failed first runs, where nothing else distinguishes releases.
-        print("Setting things up for the first time (about a minute)... [setup v2]")
+        print("Setting things up for the first time (about a minute)... [setup v3]")
         r = subprocess.run([sys.executable, "-m", "venv",
                             os.path.join(HERE, ".venv")])
         if r.returncode != 0 or not os.path.exists(vp):
@@ -91,6 +123,10 @@ def ensure_environment() -> None:
         if r.returncode != 0:
             fail("Couldn't download the needed components. Please check your\n"
                  "internet connection and try again.")
+        # A bonus, never a requirement: if this fails, setup still succeeds
+        # (silently - a pip error right before "All set!" would only alarm)
+        # and it is tried again, out loud, when a folder really has HEICs.
+        install_heic_plugin(vp, silent=True)
         print("All set!")
         print()
     raise SystemExit(
@@ -200,45 +236,87 @@ def choose_folder(argv_folder: str | None, what: str) -> str:
 # ---------------------------------------------------------------------------
 # Spotting a "folder of folders" (for the one-PDF-per-folder offer)
 # ---------------------------------------------------------------------------
-# Mirrors generate_pdf.py: same extensions (HEIC needs a plugin, so it doesn't
-# count), same skip rules for hidden files/folders and zip artefacts.
+# Mirrors generate_pdf.py: same extensions, same skip rules for hidden
+# files/folders and zip artefacts. HEIC/HEIF only count as pictures once the
+# plugin that reads them is in place - see picture_exts_for().
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff")
+HEIC_EXTS = (".heic", ".heif")
 SKIP_DIR_NAMES = {"__MACOSX", "__pycache__"}
 
 
-def folder_holds_pictures(folder: str) -> bool:
+def tree_has_heic(folder: str) -> bool:
+    """True if the folder, or any folder inside it, holds a HEIC/HEIF file."""
+    for _, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d not in SKIP_DIR_NAMES]
+        if any(not f.startswith(".") and f.lower().endswith(HEIC_EXTS)
+               for f in filenames):
+            return True
+    return False
+
+
+def picture_exts_for(folder: str) -> tuple:
+    """The picture types this run can use - HEIC included when it's readable.
+
+    Costs nothing unless the folder really holds HEIC files. Then, if the
+    plugin is missing (an environment made before HEIC support existed, or
+    whose first-run download of it failed), it is fetched on the spot - so
+    nobody has to reinstall anything, and a failure while offline simply
+    gets another chance the next time HEIC pictures turn up.
+    """
+    if not tree_has_heic(folder):
+        return IMAGE_EXTS
+    if heic_ready(sys.executable):
+        return IMAGE_EXTS + HEIC_EXTS
+    print("This folder has iPhone photos in it (HEIC files). Adding support for")
+    print("them - a small one-time download, just a moment...")
+    sys.stdout.flush()  # keep this ahead of anything pip prints when piped
+    if install_heic_plugin(sys.executable):
+        print("Done - your HEIC photos will be included.")
+        print()
+        return IMAGE_EXTS + HEIC_EXTS
+    print()
+    print("I couldn't add HEIC support on this computer, so those photos will be")
+    print("left out of the PDF. Check your internet connection and try again, or")
+    print("turn them into JPG pictures first (see 'READ ME FIRST', section 6).")
+    print()
+    return IMAGE_EXTS
+
+
+def folder_holds_pictures(folder: str, exts: tuple = IMAGE_EXTS) -> bool:
     try:
         entries = os.listdir(folder)
     except OSError:
         return False
-    return any(not e.startswith(".") and e.lower().endswith(IMAGE_EXTS)
+    return any(not e.startswith(".") and e.lower().endswith(exts)
                and os.path.isfile(os.path.join(folder, e)) for e in entries)
 
 
-def subfolders_hold_pictures(folder: str) -> bool:
+def subfolders_hold_pictures(folder: str, exts: tuple = IMAGE_EXTS) -> bool:
     for dirpath, dirnames, filenames in os.walk(folder):
         dirnames[:] = [d for d in dirnames
                        if not d.startswith(".") and d not in SKIP_DIR_NAMES]
         if dirpath != folder and any(
-                not f.startswith(".") and f.lower().endswith(IMAGE_EXTS)
+                not f.startswith(".") and f.lower().endswith(exts)
                 for f in filenames):
             return True
     return False
 
 
-def ask_per_folder(folder: str) -> bool:
+def ask_per_folder(folder: str, exts: tuple = IMAGE_EXTS) -> bool:
     """Offer one-PDF-per-folder when the chosen folder is a folder of folders.
 
     Silent (False) when there are no picture subfolders. The default answer
     follows the pictures: folders that also hold their own pictures default
     to the classic single PDF; folders that are ONLY organisers default to
     one PDF per folder, because a single PDF would come out empty.
+    `exts` is what counts as a picture for this run (see picture_exts_for).
     """
-    if not subfolders_hold_pictures(folder):
+    if not subfolders_hold_pictures(folder, exts):
         return False
     print("This folder has more folders inside it that contain pictures.")
     print("Do you want one PDF for every folder, each named after its folder?")
-    if folder_holds_pictures(folder):
+    if folder_holds_pictures(folder, exts):
         print("   1) No  - one PDF, just from the pictures directly in this folder   (default)")
         print("   2) Yes - one PDF per folder, saved together in one new folder")
         answer = ask("Choose 1 or 2 [1]: ").strip()
@@ -293,7 +371,7 @@ def run_engine(script: str, engine_args: list[str]) -> bool:
 def make_flow(argv_folder: str | None) -> None:
     banner("PDF Maker")
     folder = choose_folder(argv_folder, "pictures should I turn into a PDF")
-    per_folder = ask_per_folder(folder)
+    per_folder = ask_per_folder(folder, picture_exts_for(folder))
 
     opts: list[str] = []
     if per_folder:
