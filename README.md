@@ -120,6 +120,14 @@ Run either script with `--help` for every option.
   tag Display P3) rather than lossless PNG: a PDF can't hold HEVC data, and as
   a PNG one 12-megapixel photo costs 20+ MB. Rotation stored the iPhone way
   (`irot` box + EXIF) comes out upright.
+- Colour profiles are honoured everywhere. Plain mode embeds each file with its
+  own profile. The layouts that redraw pictures onto a fresh page (smaller
+  file, note margins, three to a page) convert every picture to sRGB first,
+  using its embedded profile — otherwise wide-gamut photos (iPhones tag Display
+  P3) come out washed out, and three differently-tagged pictures could never
+  share one page correctly. CMYK and greyscale profiles are handled too;
+  pictures without a profile are untouched, and an unreadable profile just
+  means the picture is shown as stored — never a lost page.
 - Optional page numbers (0001, 0002, …) are burned into the pages themselves in a
   neutral grey, in any corner, and keep counting across `--parts` files.
   `--number-folder` puts the folder's name in front (`beach - 0001`); with
@@ -139,9 +147,11 @@ python3 tests/run_all.py
 ```
 
 Runs the whole suite: the engine's folder-batch mode, the interactive
-launchers driven end-to-end with scripted answers, and HEIC support (synthetic
+launchers driven end-to-end with scripted answers, HEIC support (synthetic
 HEIC pictures written at test time; a machine without the HEIC plugin and the
-launcher's download step are both simulated, so no network is used). The tests
+launcher's download step are both simulated, so no network is used), and
+colour-profile handling (checked with a deliberately absurd test profile —
+sRGB with red and green swapped — so a dropped profile is unmistakable). The tests
 borrow the project's own `.venv` (run a launcher once first) and build all
 fixtures in a temporary folder — nothing in the repo is touched.
 

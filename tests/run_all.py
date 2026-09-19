@@ -11,7 +11,8 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SUITES = ("test_recursive.py", "test_launcher.py", "test_heic.py")
+SUITES = ("test_recursive.py", "test_launcher.py", "test_heic.py",
+          "test_colour.py")
 
 
 def main() -> None:

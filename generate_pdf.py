@@ -297,6 +297,51 @@ def stamp_page_number(im, number: int, corner: str, prefix: str = ""):
 
 
 # ---------------------------------------------------------------------------
+# Colour: pictures that are redrawn onto a page must be converted to sRGB
+# ---------------------------------------------------------------------------
+def resample_ready(im):
+    """im in a mode that resizes cleanly, with its colour profile still usable.
+
+    RGB, greyscale and CMYK shrink fine as they are — and CMYK has to stay
+    CMYK until to_srgb() has applied its profile. Palette, 1-bit, alpha and
+    the rarer modes go to RGB first, as they always have (the profile rides
+    along in im.info either way).
+    """
+    return im if im.mode in ("RGB", "L", "CMYK") else im.convert("RGB")
+
+
+def to_srgb(im):
+    """im as plain RGB whose numbers mean sRGB, honouring an embedded profile.
+
+    A colour profile says what a picture's numbers mean: the same (255, 0, 0)
+    is a deeper red in Display P3 — what iPhones tag their photos with — than
+    in sRGB. Embedding the original file keeps its profile, but every layout
+    that redraws the picture onto a fresh page (smaller file, note margins,
+    three to a page) loses it, and viewers then read the numbers as sRGB:
+    wide-gamut photos come out washed out. Converting the pixels instead is
+    also the only thing that can work when three pictures with different
+    profiles share one page. Pictures without a profile pass through
+    untouched, so their output stays exactly as it was — and so does one
+    whose profile is damaged or doesn't fit its mode: colour management is
+    a refinement, never a reason to lose the page.
+    """
+    icc = im.info.get("icc_profile")
+    if icc:
+        try:
+            from PIL import ImageCms
+            src = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+            space = src.profile.xcolor_space.strip()
+            if space == "RGB" and im.mode != "RGB":
+                im = im.convert("RGB")
+            if {"RGB": "RGB", "GRAY": "L", "CMYK": "CMYK"}.get(space) == im.mode:
+                return ImageCms.profileToProfile(
+                    im, src, ImageCms.createProfile("sRGB"), outputMode="RGB")
+        except Exception:
+            pass  # unusable profile (or no littlecms): show the picture as stored
+    return im if im.mode == "RGB" else im.convert("RGB")
+
+
+# ---------------------------------------------------------------------------
 # Plain (lossless) engines — used when no space/layout flags are given.
 # ---------------------------------------------------------------------------
 def prepare_sources(files: list[str], force_reencode: bool = False, progress=None,
@@ -414,7 +459,7 @@ def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None
             im = Image.open(p)
             im.load()
             im = ImageOps.exif_transpose(im)  # honour EXIF rotation (phone photos)
-            im = im if im.mode == "RGB" else im.convert("RGB")
+            im = to_srgb(im)  # Pillow's PDF writer embeds no colour profile
             if number_start:
                 stamp_page_number(im, number_start + len(pages), number_corner,
                                   number_prefix)
@@ -515,11 +560,12 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, pro
             with Image.open(p) as im:
                 im.load()
                 im = ImageOps.exif_transpose(im)
-                im = downscale(im if im.mode == "RGB" else im.convert("RGB"))
+                im = downscale(resample_ready(im))
                 fit = min(1.0, avail_w_px / im.width, avail_h_px / im.height)
                 if fit < 1.0:
                     im = im.resize((max(1, round(im.width * fit)),
                                     max(1, round(im.height * fit))), Image.LANCZOS)
+                im = to_srgb(im)  # after shrinking: far fewer pixels to convert
                 canvas = Image.new("RGB", (w_px, h_px), bg)
                 canvas.paste(im, (round((w_px - im.width) / 2), round((h_px - im.height) / 2)))
                 if number_start:
@@ -634,11 +680,13 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
             with Image.open(p) as im:
                 im.load()
                 im = ImageOps.exif_transpose(im)
-                im = downscale(im if im.mode == "RGB" else im.convert("RGB"))
+                im = downscale(resample_ready(im))
                 ensure_geometry(im.width, im.height)
                 s = min(state["cell_w"] / im.width, state["cell_h"] / im.height)
                 tw, th = max(1, round(im.width * s)), max(1, round(im.height * s))
-                tile = im.resize((tw, th), Image.LANCZOS)
+                # Each tile is converted on its own: three pictures with
+                # three different profiles can share this page.
+                tile = to_srgb(im.resize((tw, th), Image.LANCZOS))
         except Exception as exc:
             skipped.append((p, describe_error(exc)))
             continue
