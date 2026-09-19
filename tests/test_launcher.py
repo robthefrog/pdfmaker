@@ -110,8 +110,10 @@ def t2_do_another():
         except FileNotFoundError:
             pass
     # Round 1: flatA + default answers; say YES; round 2: flatB; say NO.
-    answers = (os.path.join(LT, "flatA") + "\n" + "\n" * 5 + "y\n"
-               + os.path.join(LT, "flatB") + "\n" + "\n" * 5 + "n\n")
+    # (Six questions per round: pictures per page, margin, size, page
+    # numbers, file names, how many PDFs.)
+    answers = (os.path.join(LT, "flatA") + "\n" + "\n" * 6 + "y\n"
+               + os.path.join(LT, "flatB") + "\n" + "\n" * 6 + "n\n")
     r = run_launcher(["make"], answers)
     check("launcher exits 0", r.returncode == 0, (r.stdout + r.stderr)[-400:])
     check("asks to do another folder", "another folder" in r.stdout.lower(),
@@ -134,7 +136,7 @@ def t2_do_another():
 
     # A mistyped folder re-prompts instead of quitting the whole app.
     answers = ("/nowhere/definitely-missing\n" + os.path.join(LT, "flatB")
-               + "\n" + "\n" * 5 + "n\n")
+               + "\n" + "\n" * 6 + "n\n")
     r = run_launcher(["make"], answers)
     check("bad folder gets a second chance", r.returncode == 0
           and os.path.isfile(os.path.join(LT, "flatB.pdf")),

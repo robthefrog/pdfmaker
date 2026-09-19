@@ -12,7 +12,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SUITES = ("test_recursive.py", "test_launcher.py", "test_heic.py",
-          "test_colour.py")
+          "test_colour.py", "test_names.py")
 
 
 def main() -> None:

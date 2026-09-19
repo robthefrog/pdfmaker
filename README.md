@@ -11,7 +11,7 @@ command line.
 
 | Item | What it is |
 | --- | --- |
-| **Make PDF.command** / **Make PDF.bat** | Double-click launchers (macOS / Windows): pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, page numbers, splitting; folders-of-folders get a one-PDF-per-folder offer), then offers to do another folder. On Windows you can also drag a folder onto the icon. |
+| **Make PDF.command** / **Make PDF.bat** | Double-click launchers (macOS / Windows): pictures → PDF. Asks a few plain-English questions (pictures per page, margins, file size, page numbers, file names, splitting; folders-of-folders get a one-PDF-per-folder offer), then offers to do another folder. On Windows you can also drag a folder onto the icon. |
 | **Combine PDFs.command** / **Combine PDFs.bat** | Double-click launchers (macOS / Windows): merges every PDF in a folder into one, in order. |
 | `launcher.py` | The shared interactive flow behind all four launchers — first-run setup, the questions, and revealing the finished PDF. |
 | `generate_pdf.py` | The picture-to-PDF engine (Pillow + img2pdf). |
@@ -92,6 +92,12 @@ python3 generate_pdf.py --src "path/to/pictures" --parts 3
 python3 generate_pdf.py --src "path/to/pictures" --number-pages
 python3 generate_pdf.py --src "path/to/pictures" --number-corner top-left
 
+# Print each picture's file name under it (or --names-position above):
+python3 generate_pdf.py --src "path/to/pictures" --names caption
+
+# Three per page with one summary line per page: "scans - 0001 | a.png | b.png | c.png"
+python3 generate_pdf.py --src "path/to/scans" --per-page 3 --names summary --names-id
+
 # A directory of folders: one PDF per folder, named after it, into "scans PDFs":
 python3 generate_pdf.py --src "path/to/scans" --recursive
 
@@ -133,6 +139,18 @@ Run either script with `--help` for every option.
   `--number-folder` puts the folder's name in front (`beach - 0001`); with
   `--recursive` each PDF stamps its own (disambiguated) name and the count
   restarts at 0001 per folder.
+- Optional file names (`--names caption|summary`) are printed in blank paper
+  beside the pictures and **never over a picture** — there is deliberately no
+  option for that. A margin deep enough for the label is simply used (the
+  picture doesn't move); otherwise room is made: a page sized from its picture
+  grows a thin strip, and on fixed paper the picture gives way by the missing
+  amount. `caption` hugs each picture; `summary` is one line per page at its
+  foot (or head, with `--names-position above`), optionally led by the page
+  identifier with `--names-id` (`beach - 0042 | IMG_1234.HEIC`, counting on
+  across `--parts`). `--names-hide-ext` drops the ending. Long names shrink to
+  60% first, then lose their middle (`quarterly...0012.jpeg`); letters the
+  built-in font lacks use a system font, and a letter no font has shows as `?`.
+  Labels keep clear of a page-number stamp, which stays exactly where it was.
 - `--recursive` makes one PDF per folder that holds pictures (nested folders
   included). Same-named folders are told apart by their path
   (`2023 - photos.pdf`); every other option applies to each folder's PDF, with
@@ -149,9 +167,11 @@ python3 tests/run_all.py
 Runs the whole suite: the engine's folder-batch mode, the interactive
 launchers driven end-to-end with scripted answers, HEIC support (synthetic
 HEIC pictures written at test time; a machine without the HEIC plugin and the
-launcher's download step are both simulated, so no network is used), and
+launcher's download step are both simulated, so no network is used),
 colour-profile handling (checked with a deliberately absurd test profile —
-sRGB with red and green swapped — so a dropped profile is unmistakable). The tests
+sRGB with red and green swapped — so a dropped profile is unmistakable), and
+file-name labels (flat-colour pictures on lossless pages, so every layout can
+prove pixel-exactly that a label never touches a picture). The tests
 borrow the project's own `.venv` (run a launcher once first) and build all
 fixtures in a temporary folder — nothing in the repo is touched.
 

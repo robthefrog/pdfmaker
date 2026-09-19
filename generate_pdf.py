@@ -48,6 +48,16 @@ Page numbers (optional)
     (matching its PDF's name) and the count restarts at 0001 per folder.
     Also implies --number-pages.
 
+File names (optional)
+    --names caption prints each picture's file name beside it; --names summary
+    writes one line per page listing that page's file name(s), and --names-id
+    leads that line with the page identifier ("beach - 0042 | IMG_1234.HEIC").
+    --names-position above moves them over the pictures / to the head of the
+    page, and --names-hide-ext drops the ending (IMG_1234). Labels only ever go
+    in blank paper, NEVER over a picture: the margin when it is deep enough,
+    otherwise a thin strip is made (the page grows a little, or on fixed paper
+    the picture gives way a little). Long names shrink, then lose their middle.
+
 A whole directory of folders (batch)
     --recursive walks the source folder and writes one PDF per folder that
     directly holds pictures (the top folder included), each named after its
@@ -65,6 +75,8 @@ Usage:
     python generate_pdf.py --recursive --src scans          # one PDF per folder
     python generate_pdf.py --number-pages                   # 0001... bottom right
     python generate_pdf.py --number-corner top-left         # 0001... top left
+    python generate_pdf.py --names caption                  # file name under each picture
+    python generate_pdf.py --per-page 3 --names-id          # "beach - 0001 | a.png | b.png | c.png"
     python generate_pdf.py --max-height 1000 --quality 60   # compact single PDF
     python generate_pdf.py --page letter --margin 0.5 --quality 70   # note margins
     python generate_pdf.py --per-page 3                     # 3 across, landscape
@@ -73,11 +85,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
 import glob
 import io
 import os
 import re
 import sys
+from collections import namedtuple
 
 # The live progress bar lives alongside this script; if it's ever missing
 # (e.g. this file was copied out on its own) fall back to a silent no-op so the
@@ -268,6 +282,30 @@ def number_stamp_text(number: int, prefix: str = "") -> str:
     return f"{prefix} - {text}" if prefix else text
 
 
+def _number_stamp_layout(page_size, number: int, corner: str, prefix: str = ""):
+    """Where a page-number stamp goes on a page of `page_size` pixels.
+
+    Returns (text, font, stroke, xy, rect): what stamp_page_number() draws
+    and the rectangle its ink covers — which is also what a file-name label
+    needs to know to keep out of the number's way.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    width, height = page_size
+    text = number_stamp_text(number, prefix)
+    size = max(12, round(min(page_size) * 0.03))
+    try:
+        font = ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1: fixed-size bitmap font, still legible
+        font = ImageFont.load_default()
+    stroke = max(1, size // 14)
+    left, top, right, bottom = ImageDraw.Draw(Image.new("RGB", (1, 1))).textbbox(
+        (0, 0), text, font=font, stroke_width=stroke)
+    pad = max(6, size // 2)
+    x = pad - left if "left" in corner else width - pad - right
+    y = pad - top if "top" in corner else height - pad - bottom
+    return text, font, stroke, (x, y), (x + left, y + top, x + right, y + bottom)
+
+
 def stamp_page_number(im, number: int, corner: str, prefix: str = ""):
     """Burn a zero-padded page number ("0001") into one corner of a page.
 
@@ -277,23 +315,252 @@ def stamp_page_number(im, number: int, corner: str, prefix: str = ""):
     with the page so it stays proportional at any raster size. A non-empty
     prefix (the folder's name) goes in front: "beach - 0001".
     """
-    from PIL import ImageDraw, ImageFont
-    text = number_stamp_text(number, prefix)
-    size = max(12, round(min(im.size) * 0.03))
-    try:
-        font = ImageFont.load_default(size=size)
-    except TypeError:  # Pillow < 10.1: fixed-size bitmap font, still legible
-        font = ImageFont.load_default()
-    stroke = max(1, size // 14)
-    draw = ImageDraw.Draw(im)
-    left, top, right, bottom = draw.textbbox((0, 0), text, font=font,
-                                             stroke_width=stroke)
-    pad = max(6, size // 2)
-    x = pad - left if "left" in corner else im.width - pad - right
-    y = pad - top if "top" in corner else im.height - pad - bottom
-    draw.text((x, y), text, font=font, fill=(128, 128, 128),
-              stroke_width=stroke, stroke_fill=(255, 255, 255))
+    from PIL import ImageDraw
+    text, font, stroke, xy, _ = _number_stamp_layout(im.size, number, corner, prefix)
+    ImageDraw.Draw(im).text(xy, text, font=font, fill=(128, 128, 128),
+                            stroke_width=stroke, stroke_fill=(255, 255, 255))
     return im
+
+
+# ---------------------------------------------------------------------------
+# Optional file-name labels
+#
+# The rule that shapes everything here: a label is NEVER drawn over a
+# picture. It goes in blank paper beside the picture — the margin when there
+# is one, otherwise a thin strip made for it (the page grows a little, or on
+# fixed paper the picture gives way a little). There is deliberately no
+# "print it over the picture" mode.
+# ---------------------------------------------------------------------------
+NAMES_STYLES = ("caption", "summary")
+NAMES_POSITIONS = ("below", "above")
+
+# style      "caption": each name beside its own picture;
+#            "summary": one line per page listing that page's file name(s)
+# position   "below" / "above" (a summary goes to the foot / head of the page)
+# hide_ext   drop the file ending: IMG_1234 instead of IMG_1234.HEIC
+# page_id    summary only: lead with the page identifier, "beach - 0042 | ..."
+# folder     the folder's name, for that identifier
+# first_page page number of the first page this build writes (runs on across --parts)
+NameOpts = namedtuple("NameOpts", "style position hide_ext page_id folder first_page")
+
+
+def label_text(path: str, hide_ext: bool = False) -> str:
+    """What a picture is called on the page: its file name, folders dropped."""
+    name = os.path.basename(path)
+    return os.path.splitext(name)[0] if hide_ext else name
+
+
+def shorten_middle(text: str, max_chars: int) -> str:
+    """Cut the MIDDLE out of an over-long name: both ends matter — the start
+    says what it is, and the end usually carries the number."""
+    if len(text) <= max_chars:
+        return text
+    keep = max(1, max_chars - 3)
+    head = (keep + 1) // 2
+    tail = keep - head
+    return text[:head] + "..." + (text[-tail:] if tail else "")
+
+
+def summary_text(names, number: int = 0, prefix: str = "") -> str:
+    """One page's summary line: "beach - 0042 | a.png | b.png" (number > 0
+    leads with the page identifier, written exactly like the number stamp)."""
+    lead = [number_stamp_text(number, prefix)] if number else []
+    return " | ".join(lead + list(names))
+
+
+# System fonts to try, in order, when a name has letters the built-in font
+# lacks (it is ASCII-only: even "é" is missing). Pillow finds these by file
+# name in the platform's font folders; whichever exist are used.
+_LABEL_FONT_FILES = (
+    "segoeui.ttf", "arial.ttf", "msyh.ttc", "meiryo.ttc", "malgun.ttf",  # Windows
+    "Arial Unicode.ttf", "Helvetica.ttc", "PingFang.ttc",                # macOS
+    "DejaVuSans.ttf", "NotoSans-Regular.ttf", "NotoSansCJK-Regular.ttc",  # Linux
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _builtin_font(size: int):
+    from PIL import ImageFont
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1: fixed-size bitmap font, still legible
+        return ImageFont.load_default()
+
+
+@functools.lru_cache(maxsize=None)
+def _system_font_path(file: str):
+    """Full path of a system font, or None — searched for only once."""
+    from PIL import ImageFont
+    try:
+        return ImageFont.truetype(file, 12).path
+    except Exception:
+        return None
+
+
+@functools.lru_cache(maxsize=256)
+def _system_font(file: str, size: int):
+    from PIL import ImageFont
+    path = _system_font_path(file)
+    try:
+        return ImageFont.truetype(path, size) if path else None
+    except Exception:
+        return None
+
+
+def _missing_glyph(font) -> bytes:
+    cached = getattr(font, "_pdfmaker_missing", None)
+    if cached is None:
+        cached = bytes(font.getmask("\uffff"))  # never a real character
+        try:
+            font._pdfmaker_missing = cached
+        except Exception:
+            pass
+    return cached
+
+
+def _has_glyph(font, ch: str) -> bool:
+    try:
+        return ch.isspace() or bytes(font.getmask(ch)) != _missing_glyph(font)
+    except Exception:
+        return False
+
+
+def label_font_for(text: str, size: int):
+    """(font, text to draw) that shows `text` without any missing-glyph boxes.
+
+    The built-in font keeps labels looking the same on every computer, so it
+    is used whenever it has all the letters. Otherwise the system font that
+    covers the most of them takes over, and any letter no font has is shown
+    as "?" rather than as an empty box.
+    """
+    builtin = _builtin_font(size)
+    letters = set(text)
+    if all(_has_glyph(builtin, ch) for ch in letters):
+        return builtin, text
+    best, best_cover = builtin, sum(_has_glyph(builtin, ch) for ch in letters)
+    for file in _LABEL_FONT_FILES:
+        font = _system_font(file, size)
+        if font is None:
+            continue
+        cover = sum(_has_glyph(font, ch) for ch in letters)
+        if cover > best_cover:
+            best, best_cover = font, cover
+        if cover == len(letters):
+            break
+    return best, "".join(ch if _has_glyph(best, ch) else "?" for ch in text)
+
+
+def label_size(page_w: int, page_h: int) -> int:
+    """Label type size in pixels: relative to the page, like the number
+    stamp, so it reads the same at any raster size (about 12pt on Letter)."""
+    return max(10, round(min(page_w, page_h) * 0.02))
+
+
+def _line_height(font, size: int) -> int:
+    try:
+        return sum(font.getmetrics())
+    except Exception:  # the old bitmap font has no metrics
+        return round(size * 1.2)
+
+
+def label_band(size: int) -> int:
+    """Height of the blank band a one-line label of this size needs."""
+    return _line_height(_builtin_font(size), size) + 2 * max(2, round(size * 0.25))
+
+
+def _label_pad(size: int) -> int:
+    return max(4, round(size * 0.4))
+
+
+def fit_label(names, lead: str, max_w: float, size: int, band_h: int):
+    """(font, text) for a label that fits max_w pixels on one line.
+
+    The type shrinks first, down to 60% — it stays readable and the whole
+    name survives. Only then are names shortened, each in its middle; the
+    page identifier `lead` is never cut.
+    """
+    def text_for(cap):
+        return " | ".join(([lead] if lead else [])
+                          + [shorten_middle(n, cap) for n in names])
+
+    longest = max((len(n) for n in names), default=0)
+    floor = max(8, round(size * 0.6))
+    font, shown = label_font_for(text_for(longest), floor)
+    for s in range(size, floor - 1, -1):
+        font, shown = label_font_for(text_for(longest), s)
+        if font.getlength(shown) <= max_w and _line_height(font, s) <= band_h:
+            return font, shown
+    for cap in range(longest - 1, 3, -1):
+        font, shown = label_font_for(text_for(cap), floor)
+        if font.getlength(shown) <= max_w:
+            break
+    return font, shown
+
+
+def _label_colour(bg):
+    """Soft dark grey on light paper; soft light grey on a dark --bg."""
+    from PIL import ImageColor
+    try:
+        r, g, b = ImageColor.getrgb(bg)[:3]
+    except Exception:
+        return (70, 70, 70)
+    return (70, 70, 70) if 0.299 * r + 0.587 * g + 0.114 * b >= 128 else (205, 205, 205)
+
+
+def _clear_of_number(centre_x: float, band, number_rect, max_w: float, pad: int):
+    """max_w narrowed so a label centred on centre_x inside `band`
+    (top, bottom) keeps `pad` pixels clear of the page-number stamp."""
+    if not number_rect:
+        return max_w
+    left, top, right, bottom = number_rect
+    if bottom + pad <= band[0] or top - pad >= band[1]:
+        return max_w  # the number is higher or lower than the label: no contest
+    if left > centre_x:
+        reach = left - pad - centre_x
+    elif right < centre_x:
+        reach = centre_x - (right + pad)
+    else:
+        reach = 0
+    return max(0, min(max_w, 2 * reach))
+
+
+def draw_label(page, names, lead, centre_x, band_top, band_h, max_w, size, bg,
+               number_rect=None):
+    """Write one label, centred on centre_x, inside the blank band that starts
+    at band_top. Callers guarantee the band lies outside every picture."""
+    from PIL import ImageDraw
+    max_w = _clear_of_number(centre_x, (band_top, band_top + band_h),
+                             number_rect, max_w, _label_pad(size))
+    font, text = fit_label(names, lead, max_w, size, band_h)
+    x = round(centre_x - font.getlength(text) / 2)
+    y = band_top + (band_h - _line_height(font, size)) // 2
+    ImageDraw.Draw(page).text((x, y), text, font=font, fill=_label_colour(bg))
+
+
+def _page_lead(names: NameOpts, page_no: int) -> str:
+    """The page identifier that leads a summary line ("" when not wanted)."""
+    if names.style == "summary" and names.page_id:
+        return number_stamp_text(page_no, names.folder)
+    return ""
+
+
+def with_label_strip(im, path: str, names: NameOpts, page_no: int, bg):
+    """Picture `im` as a full page plus a blank strip below (or above) it that
+    carries the label. The picture's own pixels are pasted in untouched; the
+    strip is the only place anything is written."""
+    from PIL import Image
+    size = label_size(*im.size)
+    band = label_band(size)
+    above = names.position == "above"
+    page = Image.new("RGB", (im.width, im.height + band), bg)
+    page.paste(im, (0, band if above else 0))
+    icc = im.info.get("icc_profile")
+    if icc:
+        page.info["icc_profile"] = icc  # the page keeps the picture's colour profile
+    draw_label(page, [label_text(path, names.hide_ext)], _page_lead(names, page_no),
+               im.width / 2, 0 if above else im.height, band,
+               im.width - 2 * _label_pad(size), size, bg)
+    return page
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +613,8 @@ def to_srgb(im):
 # ---------------------------------------------------------------------------
 def prepare_sources(files: list[str], force_reencode: bool = False, progress=None,
                     number_start: int = 0, number_corner: str = "bottom-right",
-                    number_prefix: str = ""):
+                    number_prefix: str = "", names: NameOpts | None = None,
+                    bg="white"):
     """Turn each file into an img2pdf-ready source, skipping unreadable ones.
 
     Upright JPEG images in RGB/grayscale are passed through untouched (embedded
@@ -369,10 +637,16 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
     JPEGs re-encode as JPEG quality 90 (visually identical, sanely sized)
     rather than ballooning into PNGs; everything else stays lossless PNG.
 
+    names adds each picture's file-name label in a blank strip under (or over)
+    the picture — see with_label_strip(). That redraws the page too, so the
+    same re-encoding applies; a page number, stamped first, stays on the
+    picture's corner exactly where it always was.
+
     Returns (sources, skipped) where skipped is a list of (path, reason).
     """
     from PIL import Image, ImageOps
     sources, skipped = [], []
+    redrawn = bool(number_start) or names is not None
     for p in files:
         if progress is not None:
             progress.step(os.path.basename(p))
@@ -384,7 +658,7 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
                 # upright, so the JPEG bytes can be embedded as-is. Any other
                 # value (e.g. an iPhone portrait) must be baked in by re-encoding.
                 upright = im.getexif().get(0x0112, 1) == 1
-                if (not force_reencode and not number_start and upright
+                if (not force_reencode and not redrawn and upright
                         and ext in (".jpg", ".jpeg") and im.mode in ("RGB", "L")):
                     sources.append(p)
                 else:
@@ -393,8 +667,11 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
                     if number_start:
                         stamp_page_number(rgb, number_start + len(sources),
                                           number_corner, number_prefix)
+                    if names is not None:
+                        rgb = with_label_strip(rgb, p, names,
+                                               names.first_page + len(sources), bg)
                     buf = io.BytesIO()
-                    if ext in HEIC_EXTS or (number_start and ext in (".jpg", ".jpeg")):
+                    if ext in HEIC_EXTS or (redrawn and ext in (".jpg", ".jpeg")):
                         # Pillow's JPEG writer drops the colour profile unless
                         # handed it (its PNG writer keeps it unasked). Phone
                         # photos are tagged Display P3 and look washed out
@@ -412,12 +689,14 @@ def prepare_sources(files: list[str], force_reencode: bool = False, progress=Non
 
 def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=None,
                        number_start: int = 0, number_corner: str = "bottom-right",
-                       number_prefix: str = ""):
+                       number_prefix: str = "", names: NameOpts | None = None,
+                       bg="white"):
     import img2pdf
     sources, skipped = prepare_sources(files, progress=progress,
                                        number_start=number_start,
                                        number_corner=number_corner,
-                                       number_prefix=number_prefix)
+                                       number_prefix=number_prefix,
+                                       names=names, bg=bg)
     if not sources:
         return 0, skipped
     if progress is not None:
@@ -435,7 +714,8 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=Non
         sources, skipped = prepare_sources(files, force_reencode=True,
                                            number_start=number_start,
                                            number_corner=number_corner,
-                                           number_prefix=number_prefix)
+                                           number_prefix=number_prefix,
+                                           names=names, bg=bg)
         if not sources:
             return 0, skipped
         try:
@@ -449,7 +729,8 @@ def build_with_img2pdf(files: list[str], out_path: str, dpi: float, progress=Non
 
 def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None,
                       number_start: int = 0, number_corner: str = "bottom-right",
-                      number_prefix: str = ""):
+                      number_prefix: str = "", names: NameOpts | None = None,
+                      bg="white"):
     from PIL import Image, ImageOps
     pages, skipped = [], []
     for p in files:
@@ -463,6 +744,8 @@ def build_with_pillow(files: list[str], out_path: str, dpi: float, progress=None
             if number_start:
                 stamp_page_number(im, number_start + len(pages), number_corner,
                                   number_prefix)
+            if names is not None:
+                im = with_label_strip(im, p, names, names.first_page + len(pages), bg)
             pages.append(im)
         except Exception as exc:
             skipped.append((p, describe_error(exc)))
@@ -498,7 +781,8 @@ def page_inches(page_spec: str, native_px: tuple[int, int], dpi: float):
 
 
 def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, progress=None,
-                  number_start=0, number_corner="bottom-right", number_prefix=""):
+                  number_start=0, number_corner="bottom-right", number_prefix="",
+                  names: NameOpts | None = None):
     """Render each image onto a page canvas; return (page_blobs, raster, skipped).
 
     Unreadable files are skipped and recorded in `skipped` as (path, reason).
@@ -507,6 +791,13 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, pro
     image is then scaled to fit within the margins (aspect kept, centred, never
     cropped), so a picture with more pixels than the first one shrinks onto the
     page instead of overflowing it.
+
+    names adds a file-name label in blank paper only. A margin deep enough
+    for it is simply used, and the picture stays exactly where it was.
+    Otherwise room is made: a "match" page (sized from the picture) grows a
+    thin strip, and fixed paper has the picture give way by the missing
+    amount. A caption hugs its picture; a summary keeps to the foot (or head)
+    of the printable area.
     """
     from PIL import Image, ImageOps
 
@@ -550,6 +841,22 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, pro
     avail_w_px = avail_w * raster
     avail_h_px = avail_h * raster
 
+    # Room for a file-name label: `grow` pixels of new strip on a "match"
+    # page, or `shrink` pixels taken from the printable box on fixed paper —
+    # zero of both when the margin already has the room.
+    size = band = grow = shrink = 0
+    above = names is not None and names.position == "above"
+    if names is not None:
+        size = label_size(w_px, h_px)
+        band = label_band(size)
+        missing = max(0, band - int(margin_in * raster))
+        if page_spec == "match":
+            grow = missing
+        else:
+            shrink = missing
+    box_top = (h_px - avail_h_px) / 2 + (shrink if above else 0)
+    box_h = avail_h_px - shrink
+
     blobs = []
     for p in files:
         if progress is not None:
@@ -561,16 +868,40 @@ def compose_pages(files, dpi, max_height, quality, margin_in, page_spec, bg, pro
                 im.load()
                 im = ImageOps.exif_transpose(im)
                 im = downscale(resample_ready(im))
-                fit = min(1.0, avail_w_px / im.width, avail_h_px / im.height)
+                fit = min(1.0, avail_w_px / im.width, box_h / im.height)
                 if fit < 1.0:
                     im = im.resize((max(1, round(im.width * fit)),
                                     max(1, round(im.height * fit))), Image.LANCZOS)
                 im = to_srgb(im)  # after shrinking: far fewer pixels to convert
+                x = round((w_px - im.width) / 2)
+                y = (round(box_top + (box_h - im.height) / 2) if shrink
+                     else round((h_px - im.height) / 2))
                 canvas = Image.new("RGB", (w_px, h_px), bg)
-                canvas.paste(im, (round((w_px - im.width) / 2), round((h_px - im.height) / 2)))
+                canvas.paste(im, (x, y))
                 if number_start:
                     stamp_page_number(canvas, number_start + len(blobs),
                                       number_corner, number_prefix)
+                if names is not None:
+                    off = grow if above else 0  # where the page sits once grown
+                    if grow:
+                        page = Image.new("RGB", (w_px, h_px + grow), bg)
+                        page.paste(canvas, (0, off))
+                        canvas = page
+                    if names.style == "caption":
+                        band_top = y + off - band if above else y + off + im.height
+                    else:
+                        band_top = (round(box_top) + off - band if above
+                                    else round(box_top + box_h) + off)
+                    number_rect = None
+                    if number_start:
+                        l, t, r, b = _number_stamp_layout(
+                            (w_px, h_px), number_start + len(blobs),
+                            number_corner, number_prefix)[4]
+                        number_rect = (l, t + off, r, b + off)
+                    draw_label(canvas, [label_text(p, names.hide_ext)],
+                               _page_lead(names, names.first_page + len(blobs)),
+                               w_px / 2, band_top, band,
+                               avail_w_px - 2 * _label_pad(size), size, bg, number_rect)
                 buf = io.BytesIO()
                 if quality:
                     canvas.save(buf, "JPEG", quality=quality, optimize=True)
@@ -606,7 +937,8 @@ def multiup_page_inches(page_spec: str):
 
 
 def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, page_spec, bg, progress=None,
-                          number_start=0, number_corner="bottom-right", number_prefix=""):
+                          number_start=0, number_corner="bottom-right", number_prefix="",
+                          names: NameOpts | None = None):
     """Render `per_page` pictures across each landscape page (one row of cells).
 
     Pictures are placed left-to-right in file order, each scaled to fit its cell
@@ -614,6 +946,11 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
     spacing between cells. Unreadable files are skipped and recorded in `skipped`
     as (path, reason); the readable ones still flow into full pages. Returns
     (page_blobs, raster, skipped) exactly like compose_pages.
+
+    names labels the pictures in blank paper only: a caption line reserved
+    inside each cell, under (or over) its picture — or, for the summary style,
+    one line for the whole page in the border at its foot (or head), with the
+    cells giving way if the border is too thin for it.
     """
     from PIL import Image, ImageOps
 
@@ -649,22 +986,60 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
             gap_px=round(gap_in * raster),
             cell_w=max(1, round(cell_w_in * raster)),
             cell_h=max(1, round(cell_h_in * raster)),
+            size=0, band=0, caption_h=0, foot=0,
         )
+        if names is not None:
+            size = label_size(state["W"], state["H"])
+            band = label_band(size)
+            state.update(size=size, band=band)
+            if names.style == "caption":
+                state["caption_h"] = band  # a line kept free inside every cell
+            else:  # the border holds the summary; cells give way if it's too thin
+                state["foot"] = max(0, band - state["gap_px"])
+        # What is left of a cell's height for the picture itself.
+        state["tile_h"] = max(1, state["cell_h"] - state["caption_h"] - state["foot"])
 
     blobs, skipped, group = [], [], []
+    above = names is not None and names.position == "above"
 
     def flush():
         if not group:
             return
         canvas = Image.new("RGB", (state["W"], state["H"]), bg)
-        for col, tile in enumerate(group):
-            cell_x = state["gap_px"] + col * (state["cell_w"] + state["gap_px"])
-            x = cell_x + (state["cell_w"] - tile.width) // 2
-            y = state["gap_px"] + (state["cell_h"] - tile.height) // 2
+        gap_px, cell_w, band = state["gap_px"], state["cell_w"], state["band"]
+        cells_top = gap_px + (state["foot"] if above else 0)
+        area_top = cells_top + (state["caption_h"] if above else 0)
+        placed = []
+        for col, (tile, path) in enumerate(group):
+            cell_x = gap_px + col * (cell_w + gap_px)
+            x = cell_x + (cell_w - tile.width) // 2
+            y = area_top + (state["tile_h"] - tile.height) // 2
             canvas.paste(tile, (x, y))
+            placed.append((cell_x, y, tile.height, path))
         if number_start:
             stamp_page_number(canvas, number_start + len(blobs), number_corner,
                               number_prefix)
+        if names is not None:
+            size, pad = state["size"], _label_pad(state["size"])
+            number_rect = None
+            if number_start:
+                number_rect = _number_stamp_layout(
+                    canvas.size, number_start + len(blobs), number_corner,
+                    number_prefix)[4]
+            if names.style == "caption":
+                for cell_x, y, tile_height, path in placed:
+                    draw_label(canvas, [label_text(path, names.hide_ext)], "",
+                               cell_x + cell_w / 2,
+                               y - band if above else y + tile_height, band,
+                               cell_w - 2 * pad, size, bg, number_rect)
+            else:
+                draw_label(canvas,
+                           [label_text(path, names.hide_ext) for *_, path in placed],
+                           _page_lead(names, names.first_page + len(blobs)),
+                           state["W"] / 2,
+                           cells_top - band if above else cells_top + state["tile_h"],
+                           band, state["W"] - 2 * gap_px - 2 * pad, size, bg,
+                           number_rect)
         buf = io.BytesIO()
         if quality:
             canvas.save(buf, "JPEG", quality=quality, optimize=True)
@@ -682,7 +1057,7 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
                 im = ImageOps.exif_transpose(im)
                 im = downscale(resample_ready(im))
                 ensure_geometry(im.width, im.height)
-                s = min(state["cell_w"] / im.width, state["cell_h"] / im.height)
+                s = min(state["cell_w"] / im.width, state["tile_h"] / im.height)
                 tw, th = max(1, round(im.width * s)), max(1, round(im.height * s))
                 # Each tile is converted on its own: three pictures with
                 # three different profiles can share this page.
@@ -690,7 +1065,7 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
         except Exception as exc:
             skipped.append((p, describe_error(exc)))
             continue
-        group.append(tile)
+        group.append((tile, p))
         if len(group) == n:
             flush()
     flush()
@@ -702,13 +1077,21 @@ def compose_multiup_pages(files, dpi, max_height, quality, per_page, gap_cm, pag
 
 def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
           margin=0.0, page="match", bg="white", per_page=1, gap_cm=0.5, progress=None,
-          number_start=0, number_corner="bottom-right", number_prefix=""):
+          number_start=0, number_corner="bottom-right", number_prefix="",
+          names: NameOpts | None = None):
     """Build one PDF. Returns (pages_written, skipped).
 
     number_start > 0 burns page numbers onto the pages, starting at that
     value (0001-style), into number_corner; 0 leaves pages untouched.
     A non-empty number_prefix goes in front of each number ("beach - 0001").
+    names (a NameOpts) adds file-name labels beside the pictures.
     """
+    if names is not None:
+        from PIL import ImageColor
+        try:  # the label strip is painted in --bg even in plain mode
+            ImageColor.getrgb(bg)
+        except Exception:
+            sys.exit(f"error: --bg is not a valid colour: {bg!r}")
     if per_page > 1:
         # The N-per-page landscape layout is always a composed raster, so it
         # needs img2pdf just like the other space/layout options below.
@@ -719,7 +1102,7 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
         blobs, raster, skipped = compose_multiup_pages(
             files, dpi, max_height, quality, per_page, gap_cm, page, bg, progress=progress,
             number_start=number_start, number_corner=number_corner,
-            number_prefix=number_prefix)
+            number_prefix=number_prefix, names=names)
         if not blobs:
             return 0, skipped
         if progress is not None:
@@ -739,11 +1122,13 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
             return build_with_img2pdf(files, out_path, dpi, progress=progress,
                                       number_start=number_start,
                                       number_corner=number_corner,
-                                      number_prefix=number_prefix)
+                                      number_prefix=number_prefix,
+                                      names=names, bg=bg)
         return build_with_pillow(files, out_path, dpi, progress=progress,
                                  number_start=number_start,
                                  number_corner=number_corner,
-                                 number_prefix=number_prefix)
+                                 number_prefix=number_prefix,
+                                 names=names, bg=bg)
     try:
         import img2pdf
     except ImportError:
@@ -751,7 +1136,7 @@ def build(engine, files, out_path, dpi, *, max_height=0, quality=0,
                  "(pip install img2pdf)")
     blobs, raster, skipped = compose_pages(files, dpi, max_height, quality, margin, page, bg, progress=progress,
                                            number_start=number_start, number_corner=number_corner,
-                                           number_prefix=number_prefix)
+                                           number_prefix=number_prefix, names=names)
     if not blobs:
         return 0, skipped
     if progress is not None:
@@ -779,13 +1164,14 @@ def note_needs_plugin(needs_plugin: list[str]) -> None:
 
 
 def make_pdfs(files, out_path, parts, args, engine, *, bar_label=None,
-              number_prefix=""):
+              number_prefix="", folder_label=""):
     """One whole --parts run: chunk the images and write the PDF file(s).
 
     Prints the per-part result lines, the split total and the skipped-file
     warnings. main() calls this once normally, or once per folder with
     --recursive (bar_label then names the folder on the progress bar, and
-    number_prefix carries that folder's name into the page stamps).
+    number_prefix carries that folder's name into the page stamps;
+    folder_label is the same name for a summary line's page identifier).
     Returns (pages_written, bytes_written, files_skipped).
     """
     number_corner = args.number_corner or "bottom-right"
@@ -807,7 +1193,11 @@ def make_pdfs(files, out_path, parts, args, engine, *, bar_label=None,
             # Numbers continue across parts: the next part picks up right
             # after the pages already written (skipped files leave no gap).
             number_start=(1 + total_pages) if args.number_pages else 0,
-            number_corner=number_corner, number_prefix=number_prefix)
+            number_corner=number_corner, number_prefix=number_prefix,
+            # A summary's page identifier counts on across parts the same way.
+            names=(args.names_opts._replace(folder=folder_label,
+                                            first_page=1 + total_pages)
+                   if args.names_opts else None))
         bar.close()
         all_skipped.extend(skipped)
         total_pages += pages_written
@@ -895,11 +1285,43 @@ def main() -> None:
                     help="put the folder's name in front of each page number "
                          "('beach - 0001'); with --recursive each folder stamps "
                          "its own name; implies --number-pages")
+    ap.add_argument("--names", choices=list(NAMES_STYLES), default=None,
+                    metavar="STYLE",
+                    help="show each picture's file name, in blank paper beside "
+                         "the pictures (never over them): 'caption' puts each "
+                         "name by its own picture, 'summary' writes one line "
+                         "per page listing that page's file name(s)")
+    ap.add_argument("--names-position", choices=list(NAMES_POSITIONS), default=None,
+                    metavar="WHERE",
+                    help="below (default) or above: under/over each picture, or "
+                         "for a summary the foot/head of the page; implies "
+                         "--names caption")
+    ap.add_argument("--names-hide-ext", action="store_true",
+                    help="leave the file ending off (IMG_1234, not IMG_1234.HEIC); "
+                         "implies --names caption")
+    ap.add_argument("--names-id", action="store_true",
+                    help="summary style only: start the line with the page "
+                         "identifier - folder name and page number, like "
+                         "'beach - 0042 | IMG_1234.HEIC'; implies --names summary")
     ap.add_argument("--engine", choices=["auto", "img2pdf", "pillow"], default="auto",
                     help="PDF engine for the plain lossless case (default: auto)")
     args = ap.parse_args()
     if (args.number_corner or args.number_folder) and not args.number_pages:
         args.number_pages = True
+    if args.names is None and args.names_id:
+        args.names = "summary"
+    if args.names is None and (args.names_position or args.names_hide_ext):
+        args.names = "caption"
+    if args.names_id and args.names != "summary":
+        sys.exit("error: --names-id leads a summary line with the page "
+                 "identifier, so it needs --names summary (a caption belongs "
+                 "to one picture, not to the page)")
+    args.names_opts = None
+    if args.names:
+        args.names_opts = NameOpts(style=args.names,
+                                   position=args.names_position or "below",
+                                   hide_ext=args.names_hide_ext,
+                                   page_id=args.names_id, folder="", first_page=1)
 
     if args.parts < 1:
         sys.exit(f"error: --parts must be >= 1 (got {args.parts})")
@@ -933,6 +1355,12 @@ def main() -> None:
     if args.number_pages:
         style = "folder name + 0001..." if args.number_folder else "0001..."
         notes.append(f"page numbers ({style}) {args.number_corner or 'bottom-right'}")
+    if args.names_opts:
+        notes.append("file names ("
+                     + args.names_opts.style
+                     + (" with page id" if args.names_opts.page_id else "")
+                     + f", {args.names_opts.position}"
+                     + (", no ending" if args.names_opts.hide_ext else "") + ")")
     if notes:
         print("options:", ", ".join(notes))
 
@@ -973,7 +1401,8 @@ def main() -> None:
                 bar_label=stem,
                 # The stamp matches the PDF's name, so pages from two
                 # same-named folders stay tellable apart on paper too.
-                number_prefix=stem if args.number_folder else "")
+                number_prefix=stem if args.number_folder else "",
+                folder_label=stem)
             grand_pages += pages
             grand_bytes += nbytes
             if pages:
@@ -1002,10 +1431,10 @@ def main() -> None:
         print(f"splitting {len(files)} images into {args.parts} parts "
               f"({engine}, {args.dpi:g} dpi): sizes {sizes}")
 
-    prefix = (os.path.basename(os.path.abspath(args.src))
-              if args.number_folder else "")
+    folder = os.path.basename(os.path.abspath(args.src))
     total_pages, _, _ = make_pdfs(files, args.out, args.parts, args, engine,
-                                  number_prefix=prefix)
+                                  number_prefix=folder if args.number_folder else "",
+                                  folder_label=folder)
     if total_pages == 0:
         sys.exit("error: no images could be read — no PDF was produced.")
 

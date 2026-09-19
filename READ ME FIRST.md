@@ -44,7 +44,7 @@ PDF Maker needs **Python**, a free program. Install it once:
 3. When it asks for a folder, just press <kbd>Return</kbd> (or drag a different folder in).
 4. It asks a few quick questions — **pictures per page** (one, or three to a
    landscape page), **note margins** / **spacing**, **file size**, **page
-   numbers**, and **how many PDF files** (all explained below). Press
+   numbers**, **file names**, and **how many PDF files** (all explained below). Press
    <kbd>Return</kbd> for the normal choice each time. (If your folder is
    really a *collection of folders*, there's one extra question first —
    see *A whole folder of folders* below.)
@@ -175,6 +175,29 @@ If you also split into several PDFs, the numbers **keep counting across the file
 part 2 carries on where part 1 stopped. In the Terminal (see §7) this is
 `--number-pages`, plus `--number-corner top-left` (etc.) to pick a different
 corner, plus `--number-folder` for the folder's name in front.
+
+## File names beside the pictures 🏷️
+
+Need to know *which file* each picture came from once it's printed? PDF Maker
+can write every picture's file name on the page. The names go in the **blank
+paper beside the pictures — never on top of a picture**. If a picture fills the
+whole page, PDF Maker adds a thin blank strip for the name instead (or, on
+Letter paper with no margin, makes the picture a touch smaller).
+
+When it asks *"Do you want file names shown on the pages?"*, answer **Yes** and
+it asks three quick follow-ups — press <kbd>Return</kbd> for the usual choice:
+
+| Question | Choices |
+| --- | --- |
+| **How?** | **Caption** (default) — each name right next to its own picture. **Summary** — one line per page listing the file name(s) on it. **Summary with page identifier** — the same line starting with the folder name and page number, like `beach - 0042 \| IMG_1234.HEIC`. |
+| **Where?** | **Below** (default) or **above** the pictures. A summary goes at the foot or the head of the page. |
+| **File ending?** | **Show** it (`IMG_1234.HEIC`, default) or **hide** it (`IMG_1234`). |
+
+A very long name is printed smaller, and if it still doesn't fit it loses its
+middle (`quarterly...0012.jpeg`) so you keep the start *and* the number at the
+end. If you also stamp page numbers, the names keep clear of them. In the
+Terminal (see §7) this is `--names caption` or `--names summary`, plus
+`--names-id`, `--names-position above` and `--names-hide-ext`.
 
 ## A whole folder of folders 🗂️
 

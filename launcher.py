@@ -366,6 +366,46 @@ def run_engine(script: str, engine_args: list[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# The file-name menu (only reached after a "Yes" to the gating question)
+# ---------------------------------------------------------------------------
+def ask_file_names() -> list[str]:
+    """The nested choices for file-name labels, as generate_pdf.py options.
+
+    Style first, then where it goes, then whether the file ending shows.
+    There is deliberately no choice that prints over a picture: when a layout
+    has no blank room, the engine makes room instead.
+    """
+    opts: list[str] = []
+    print("How should the file names be shown?")
+    print("   1) Caption - each name right next to its own picture   (default)")
+    print("   2) Summary - one line per page, listing the file name(s) on that page")
+    print("   3) Summary with page identifier - the same line, starting with the")
+    print("      folder name and page number, like:  beach - 0042 | IMG_1234.HEIC")
+    style = ask("Choose 1, 2 or 3 [1]: ").strip()
+    if style == "2":
+        opts += ["--names", "summary"]
+    elif style == "3":
+        opts += ["--names", "summary", "--names-id"]
+    else:
+        opts += ["--names", "caption"]
+    print()
+
+    print("Where should they go?")
+    print("   1) Below - under each picture; a summary goes at the foot of the page   (default)")
+    print("   2) Above - just above each picture; a summary goes at the head of the page")
+    if ask("Choose 1 or 2 [1]: ").strip() == "2":
+        opts += ["--names-position", "above"]
+    print()
+
+    print("Show the file ending too (like .jpg or .HEIC)?")
+    print("   1) Yes - IMG_1234.HEIC   (default)")
+    print("   2) No  - IMG_1234")
+    if ask("Choose 1 or 2 [1]: ").strip() == "2":
+        opts += ["--names-hide-ext"]
+    return opts
+
+
+# ---------------------------------------------------------------------------
 # The two flows
 # ---------------------------------------------------------------------------
 def make_flow(argv_folder: str | None) -> None:
@@ -440,6 +480,16 @@ def make_flow(argv_folder: str | None) -> None:
         named = ask("y or n [n]: ").strip().lower()
         if named in ("y", "yes"):
             opts += ["--number-folder"]
+    print()
+
+    print("Do you want file names shown on the pages, so you can tell which file")
+    print("each picture came from? They are printed in the blank paper beside the")
+    print("pictures - never on top of a picture.")
+    print("   1) No    (default)")
+    print("   2) Yes")
+    if ask("Choose 1 or 2 [1]: ").strip() == "2":
+        print()
+        opts += ask_file_names()
     print()
 
     print("How many PDF files do you want? Splitting divides the pictures evenly")
